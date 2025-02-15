@@ -6,7 +6,7 @@ import { Message } from "ai"
 import Bubble from "./components/Bubble"
 import LoadingBubble from "./components/LoadingBubble"
 import PromptSuggestionRow from "./components/PromptSuggestionRow"
-import { useState, useEffect } from "react"
+
 
 const Home = () => {
   const { append, isLoading, messages, input, handleInputChange, handleSubmit } = useChat();

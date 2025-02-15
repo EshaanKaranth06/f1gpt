@@ -1,7 +1,7 @@
 import { DataAPIClient } from "@datastax/astra-db-ts";
 import { PuppeteerWebBaseLoader } from "@langchain/community/document_loaders/web/puppeteer";
 import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
-import { Embeddings } from "deepinfra"; // Use DeepInfra's Embeddings
+import { Embeddings } from "deepinfra"; 
 
 import "dotenv/config";
 
@@ -63,7 +63,7 @@ const loadSampleData = async () => {
     const chunks = await splitter.splitText(content);
 
     for await (const chunk of chunks) {
-      // Use DeepInfra's generate() method to get embeddings.
+      
       const output = await deepInfraClient.generate({ inputs: [chunk] });
       const vector = output.embeddings[0];
       const res = await collection.insertOne({

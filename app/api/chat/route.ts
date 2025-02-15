@@ -5,7 +5,7 @@ import { DataAPIClient } from "@datastax/astra-db-ts"
 
 const deepinfra = createDeepInfra({
     apiKey: "KAp9uS5dAyE6IdTDvReSdpIMpNcpHTV0",
-  });
+  })
 
 const {
   ASTRA_DB_NAMESPACE,
