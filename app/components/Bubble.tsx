@@ -1,9 +1,20 @@
-const Bubble = ({message}) => {
-
-    const {content, role} = message
-    return (
-        <div className={`${role} bubble`}>{content}</div>
-    )
+interface Message {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  createdAt: Date;
 }
 
-export default Bubble
+interface BubbleProps {
+  message: Message;
+}
+
+const Bubble: React.FC<BubbleProps> = ({ message }) => {
+  return (
+    <div className={`bubble ${message.role}`}>
+      {message.content}
+    </div>
+  );
+};
+
+export default Bubble;
