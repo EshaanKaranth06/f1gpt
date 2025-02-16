@@ -2,14 +2,14 @@ import { createDeepInfra } from "@ai-sdk/deepinfra";
 import { streamText } from "ai";
 import { DataAPIClient } from "@datastax/astra-db-ts";
 
-// Environment variables setup remains the same...
+
 const DEEPINFRA_API_KEY = process.env.DEEPINFRA_API_KEY || '';
 const ASTRA_DB_NAMESPACE = process.env.ASTRA_DB_NAMESPACE || '';
 const ASTRA_DB_COLLECTION = process.env.ASTRA_DB_COLLECTION || '';
 const ASTRA_DB_API_ENDPOINT = process.env.ASTRA_DB_API_ENDPOINT || '';
 const ASTRA_DB_APPLICATION_TOKEN = process.env.ASTRA_DB_APPLICATION_TOKEN || '';
 
-// Environment checks remain the same...
+
 if (!DEEPINFRA_API_KEY) {
     throw new Error(" Missing DeepInfra API key");
 }
@@ -18,7 +18,7 @@ if (!ASTRA_DB_NAMESPACE || !ASTRA_DB_COLLECTION || !ASTRA_DB_API_ENDPOINT || !AS
     throw new Error(" Missing required AstraDB environment variables.");
 }
 
-// Client initialization remains the same...
+
 const deepinfra = createDeepInfra({
     apiKey: DEEPINFRA_API_KEY
 });
@@ -47,7 +47,7 @@ export async function POST(req: Request) {
 
         let docContext = "";
 
-        // Vector search setup remains the same...
+        
         const embeddingResponse = await fetch("https://api.deepinfra.com/v1/inference/intfloat/e5-large-v2", {
             method: "POST",
             headers: {
@@ -70,7 +70,7 @@ export async function POST(req: Request) {
 
         const embedding = embeddingData.embeddings[0];
 
-        // Database query remains the same...
+        
         try {
             const collection = await db.collection(ASTRA_DB_COLLECTION);
             const cursor = await collection.find({}, {
@@ -87,15 +87,15 @@ export async function POST(req: Request) {
             docContext = "";
         }
 
-        // Updated streaming implementation
+       
         const encoder = new TextEncoder();
         const stream = new TransformStream();
         const writer = stream.writable.getWriter();
 
-        // Start streaming process
+        
         (async () => {
             try {
-                // Send initial empty message to establish stream
+                
                 const initialMessage = {
                     id: Date.now().toString(),
                     role: 'assistant' as const,
@@ -113,6 +113,7 @@ export async function POST(req: Request) {
                             content: `You are an AI assistant specializing in Formula One.
                             Use the below context to augment your knowledge.
                             Do NOT mention sources or missing information.
+                            Always be kind and ask if the user needs any help.
 
                             ------------------------
                             START CONTEXT
@@ -139,7 +140,7 @@ export async function POST(req: Request) {
                     await writer.write(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
                 }
 
-                // Send final DONE message
+                
                 await writer.write(encoder.encode('data: [DONE]\n\n'));
             } catch (error) {
                 console.error("Streaming error:", error);
