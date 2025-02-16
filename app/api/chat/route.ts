@@ -11,11 +11,11 @@ const ASTRA_DB_APPLICATION_TOKEN = process.env.ASTRA_DB_APPLICATION_TOKEN || '';
 
 // Environment checks remain the same...
 if (!DEEPINFRA_API_KEY) {
-    throw new Error("❌ Missing DeepInfra API key");
+    throw new Error(" Missing DeepInfra API key");
 }
 
 if (!ASTRA_DB_NAMESPACE || !ASTRA_DB_COLLECTION || !ASTRA_DB_API_ENDPOINT || !ASTRA_DB_APPLICATION_TOKEN) {
-    throw new Error("❌ Missing required AstraDB environment variables.");
+    throw new Error(" Missing required AstraDB environment variables.");
 }
 
 // Client initialization remains the same...
@@ -39,11 +39,11 @@ export async function POST(req: Request) {
     try {
         const { messages } = await req.json();
         if (!messages || !Array.isArray(messages)) {
-            throw new Error("❌ Invalid request: 'messages' must be an array.");
+            throw new Error(" Invalid request: 'messages' must be an array.");
         }
 
         const latestMessage = messages[messages.length - 1]?.content;
-        if (!latestMessage) throw new Error("❌ No user message found.");
+        if (!latestMessage) throw new Error(" No user message found.");
 
         let docContext = "";
 
@@ -59,13 +59,13 @@ export async function POST(req: Request) {
 
         if (!embeddingResponse.ok) {
             const errorText = await embeddingResponse.text();
-            console.error("🔥 DeepInfra API Error:", errorText);
-            throw new Error("❌ Failed to fetch embeddings.");
+            console.error("DeepInfra API Error:", errorText);
+            throw new Error("Failed to fetch embeddings.");
         }
 
         const embeddingData = await embeddingResponse.json();
         if (!embeddingData?.embeddings?.length) {
-            throw new Error("❌ DeepInfra returned an invalid response.");
+            throw new Error("DeepInfra returned an invalid response.");
         }
 
         const embedding = embeddingData.embeddings[0];
@@ -83,7 +83,7 @@ export async function POST(req: Request) {
             const documents = await cursor.toArray();
             docContext = JSON.stringify(documents.map(doc => doc.text ?? ""));
         } catch (error) {
-            console.error("❌ DB Error:", error);
+            console.error(" DB Error:", error);
             docContext = "";
         }
 
@@ -174,7 +174,7 @@ export async function POST(req: Request) {
         });
 
     } catch (error: unknown) {
-        console.error("❌ API Error:", error);
+        console.error("API Error:", error);
         const errorResponse: ErrorResponse = {
             error: "Internal Server Error",
             details: error instanceof Error ? error.message : "Unknown error occurred"

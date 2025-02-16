@@ -24,7 +24,7 @@ const Home = () => {
   };
 
   useEffect(() => {
-    console.log("💥 Chat State Updated", { isLoading, input, messages });
+    console.log("Chat State Updated", { isLoading, input, messages });
     scrollToBottom();
   }, [isLoading, input, messages]);
 

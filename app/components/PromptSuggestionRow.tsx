@@ -4,8 +4,8 @@ interface PromptSuggestionRowProps {
   
   const PromptSuggestionRow: React.FC<PromptSuggestionRowProps> = ({ onPromptClick }) => {
     const suggestions = [
-      "Who won the last F1 race?",
-      "Tell me about Max Verstappen",
+      "Who won the 2024 Driver's Championship?",
+      "du du du du MAX VERSTAPPEN",
       "What is DRS?",
       "Which team won the 2024 Constructor's Championship"
     ];

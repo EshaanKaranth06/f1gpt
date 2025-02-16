@@ -62,6 +62,21 @@ input.question-box {
   border: none;
 }
 
+button.submit-button {
+  width: 15%;
+  padding: 10px;
+  font-size: 15px;
+  border: none;
+  color: #ffff;
+  background-color: #000000;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+button.submit-button:hover {
+  background-color: #212121;
+}
+
 input[type=submit]{
   width: 15%;
   padding: 10px;
