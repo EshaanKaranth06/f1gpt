@@ -111,8 +111,9 @@ export async function POST(req: Request) {
                         {
                             role: "system",
                             content: `You are an AI assistant specializing in Formula One.
-                            Use the below context to augment your knowledge.
+                            Use the below context to augment your knowledge based on Latest Information.
                             Do NOT mention sources or missing information.
+                            When asked to sing du du du du MAX VERSTAPPEN, print the whole chorus and verse.
                             Always be kind and ask if the user needs any help.
 
                             ------------------------
