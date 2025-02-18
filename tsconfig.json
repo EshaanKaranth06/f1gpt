@@ -44,7 +44,7 @@
   "ts-node": {
     "transpileOnly": true,
     "compilerOptions": {
-      "module": "CommonJS"                  // Added for ts-node compatibility
+      "module": "NodeNext"                  // Added for ts-node compatibility
     }
   }
 }
