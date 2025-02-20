@@ -33,7 +33,8 @@ const f1Data = [
   "https://sportstar.thehindu.com/motorsport/f1/franco-colapinto-will-return-williams-team-principal-james-vowels-formula-one-alpine-f1-news/article69220777.ece",
   "https://www.bbc.com/sport/formula1/articles/c5y43wrxgego",
   "https://www.formula1.com/en/results/2024/races",
-  "https://en.wikipedia.org/wiki/2024_Formula_One_World_Championship"
+  "https://en.wikipedia.org/wiki/2024_Formula_One_World_Championship",
+  "https://www.formula1.com/en/results/2024/team"
 ];
 
 

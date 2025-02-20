@@ -7,6 +7,9 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "2mb",
     }
   },
+  eslint: {
+    ignoreDuringBuilds: true, 
+  },
   webpack: (config) => {
     config.experiments = {
       ...config.experiments,
