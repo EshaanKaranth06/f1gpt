@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "target": "ES2022",                     // Updated to support newer features
+    "target": "ES2022",                     
     "lib": [
       "dom",
       "dom.iterable",
@@ -8,7 +8,7 @@
     ],
     "allowJs": true,
     "skipLibCheck": true,
-    "strict": true,                         // Changed to true for better type safety
+    "strict": true,                         
     "noEmit": true,
     "esModuleInterop": true,
     "module": "NodeNext",
@@ -25,7 +25,7 @@
         "name": "next"
       }
     ],
-    "types": [                              // Added explicit types
+    "types": [                              
       "node",
       "next",
       "react"
@@ -36,7 +36,7 @@
     "**/*.tsx",
     "next-env.d.ts",
     ".next/types/**/*.ts",
-    "types/**/*.d.ts"                      // Added for custom type definitions
+    "types/**/*.d.ts"                      
   ],
   "exclude": [
     "node_modules"
@@ -44,7 +44,7 @@
   "ts-node": {
     "transpileOnly": true,
     "compilerOptions": {
-      "module": "NodeNext"                  // Added for ts-node compatibility
+      "module": "NodeNext"                  
     }
   }
 }
