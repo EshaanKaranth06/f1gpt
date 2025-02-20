@@ -31,7 +31,9 @@ const f1Data = [
   "https://www.mirror.co.uk/sport/formula-1/lewis-hamilton-title-ferrari-verstappen-34695324",
   "https://www.gpfans.com/us/f1-news/1017507/f1-twitter-memes-japanese-gp-lance-stroll/",
   "https://sportstar.thehindu.com/motorsport/f1/franco-colapinto-will-return-williams-team-principal-james-vowels-formula-one-alpine-f1-news/article69220777.ece",
-  "https://www.bbc.com/sport/formula1/articles/c5y43wrxgego"
+  "https://www.bbc.com/sport/formula1/articles/c5y43wrxgego",
+  "https://www.formula1.com/en/results/2024/races",
+  "https://en.wikipedia.org/wiki/2024_Formula_One_World_Championship"
 ];
 
 
