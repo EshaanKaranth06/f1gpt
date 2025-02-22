@@ -154,6 +154,7 @@ Response Guidelines:
 4. Stick strictly to the context, do not deviate from the topic.
 5. Keep your language simple and clear.
 6. Never start with "Based on the available documents" or anything that sounds like a disclaimer.
+7. Avoid unnecessary details, only give relevant answers.
 
 Your response:`;
 
