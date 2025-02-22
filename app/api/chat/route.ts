@@ -167,7 +167,7 @@ Your response:`;
                         max_new_tokens: 1000,
                         temperature: 0.2,  // Lowered temperature for more controlled responses
                         top_p: 0.2,      // Slightly lower top_p to reduce randomness
-                        repetition_penalty: 1.1,
+                        repetition_penalty: 1.6,
                         stop_sequences: ["</s>", "<s>", "[INST]", "[/INST]"]
                     }
                 });
