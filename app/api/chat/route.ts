@@ -21,7 +21,7 @@ const db = client.db(ASTRA_DB_API_ENDPOINT, {
     namespace: ASTRA_DB_NAMESPACE
 });
 
-const LLM_MODEL = "deepseek-ai/DeepSeek-R1";
+const LLM_MODEL = "EleutherAI/gpt-neo-2.7B";
 const EMBEDDING_MODEL = "intfloat/e5-large-v2";
 
 interface ErrorResponse {
