@@ -36,7 +36,7 @@ const Bubble: React.FC<BubbleProps> = ({ message }) => {
     <div className={`bubble ${message.role}`}>
       <div className="bubble-header">
         <span className="bubble-avatar">
-          {message.role === 'assistant' ? '🤖' : '👤'}
+          {message.role === 'assistant' ? '🏎️' : '👤'}
         </span>
         <span className="bubble-name">
           {message.role === 'assistant' ? 'F1GPT' : 'You'}
