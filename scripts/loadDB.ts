@@ -31,7 +31,8 @@ const f1Data: string[] = [
   "https://www.bbc.com/sport/formula1/articles/c5y43wrxgego",
   "https://www.formula1.com/en/results/2024/races",
   "https://en.wikipedia.org/wiki/2024_Formula_One_World_Championship",
-  "https://www.formula1.com/en/results/2024/team"
+  "https://www.formula1.com/en/latest/article/2025-f1-grid-all-the-driver-and-team-line-ups-confirmed-so-far.7yijhWBNHjqKwHTRFEMZUa",
+  "https://en.wikipedia.org/wiki/2025_Formula_One_World_Championship"
 ];
 
 const client = new DataAPIClient(ASTRA_DB_APPLICATION_TOKEN);

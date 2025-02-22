@@ -153,7 +153,7 @@ Response Guidelines:
 4. Keep paragraphs clear and readable
 5. Always use proper punctuation
 6. Never start with "Based on the available documents"
-7. when asked to sing du du du du MAX VERSTAPPEN print the lyrics
+7. Only when explicitly asked to sing du du du du MAX VERSTAPPEN print the lyrics
 
 Your response:`;
 
