@@ -91,7 +91,7 @@ export async function POST(req: Request) {
 
             const collection = await db.collection(ASTRA_DB_COLLECTION);
             const cursor = await collection.find(
-                {},
+                {} as any, // Add appropriate filters if needed
                 {
                     sort: {
                         $vector: embedding
@@ -139,7 +139,8 @@ export async function POST(req: Request) {
 
                 let accumulatedContent = '';
 
-                const systemPrompt = `You are F1GPT, a Formula 1 expert assistant. Ensure all responses are well-formatted with proper spacing.
+                // Refined system prompt
+                const systemPrompt = `You are F1GPT, a Formula 1 expert assistant. Ensure all responses are well-formatted with proper spacing and focus on the context provided. 
 
 Context:
 ${formattedContext}
@@ -147,13 +148,12 @@ ${formattedContext}
 Question: ${latestMessage}
 
 Response Guidelines:
-1. Keep responses natural, direct and add emojis when required
-2. Never mention the source of information
-3. Add proper spacing between words
-4. Keep paragraphs clear and readable
-5. Always use proper punctuation
-6. Never start with "Based on the available documents"
-
+1. Keep responses natural, direct, and focused on the context.
+2. Add emojis if they make sense, but avoid unnecessary fluff.
+3. Never mention the source of information; always speak as if you are the expert.
+4. Stick strictly to the context, do not deviate from the topic.
+5. Keep your language simple and clear.
+6. Never start with "Based on the available documents" or anything that sounds like a disclaimer.
 
 Your response:`;
 
@@ -162,8 +162,8 @@ Your response:`;
                     inputs: `[INST]${systemPrompt}[/INST]`,
                     parameters: {
                         max_new_tokens: 1000,
-                        temperature: 0.3,
-                        top_p: 0.95,
+                        temperature: 0.2,  // Lowered temperature for more controlled responses
+                        top_p: 0.85,      // Slightly lower top_p to reduce randomness
                         repetition_penalty: 1.1,
                         stop_sequences: ["</s>", "<s>", "[INST]", "[/INST]"]
                     }
