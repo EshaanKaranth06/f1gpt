@@ -11,8 +11,8 @@
     "strict": true,                         
     "noEmit": true,
     "esModuleInterop": true,
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "ESNext",  ///NodeNext
+    "moduleResolution": "bundler", ///NodeNext
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "preserve",
@@ -29,7 +29,9 @@
       "node",
       "next",
       "react"
-    ]
+    ],
+    "allowImportingTsExtensions": true,     // Added for .ts/.tsx extension support
+    "moduleDetection": "force"              // Added for better module detection
   },
   "include": [
     "**/*.ts",
@@ -44,7 +46,7 @@
   "ts-node": {
     "transpileOnly": true,
     "compilerOptions": {
-      "module": "NodeNext"                  
+      "module": "CommonJS"                  
     }
   }
 }

@@ -5,7 +5,8 @@ const nextConfig: NextConfig = {
   experimental: {
     serverActions: {
       bodySizeLimit: "2mb",
-    }
+    },
+    esmExternals: true // Added for ESM support
   },
   eslint: {
     ignoreDuringBuilds: true, 

@@ -1,4 +1,5 @@
 {
+  "type": "module",
   "name": "f1gpt",
   "version": "0.1.0",
   "private": true,
@@ -12,7 +13,7 @@
   "dependencies": {
     "@ai-sdk/deepinfra": "^0.1.11",
     "@datastax/astra-db-ts": "^1.5.0",
-    "@huggingface/inference": "^2.8.1",
+    "@huggingface/inference": "^3.3.6",
     "@langchain/community": "^0.3.30",
     "@types/puppeteer": "^5.4.7",
     "ai": "^4.1.41",

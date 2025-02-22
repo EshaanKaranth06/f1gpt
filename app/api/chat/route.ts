@@ -1,162 +1,214 @@
-import Together from "together-ai"
-import { streamText } from "ai";
+import { HfInference } from '@huggingface/inference';
 import { DataAPIClient } from "@datastax/astra-db-ts";
 
-
-const TOGETHER_API_KEY = process.env.TOGETHER_API_KEY || '';
+const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY || '';
 const ASTRA_DB_NAMESPACE = process.env.ASTRA_DB_NAMESPACE || '';
-const ASTRA_DB_COLLECTION = process.env.ASTRA_DB_COLLECTION || '';
+const ASTRA_DB_COLLECTION = 'f1gpt';
 const ASTRA_DB_API_ENDPOINT = process.env.ASTRA_DB_API_ENDPOINT || '';
 const ASTRA_DB_APPLICATION_TOKEN = process.env.ASTRA_DB_APPLICATION_TOKEN || '';
 
-const together = new Together()
-
-if (!TOGETHER_API_KEY) {
-    throw new Error(" Missing Together API key");
+if (!HUGGINGFACE_API_KEY) {
+    throw new Error("Missing Hugging Face API key");
 }
 
-if (!ASTRA_DB_NAMESPACE || !ASTRA_DB_COLLECTION || !ASTRA_DB_API_ENDPOINT || !ASTRA_DB_APPLICATION_TOKEN) {
-    throw new Error(" Missing required AstraDB environment variables.");
+if (!ASTRA_DB_NAMESPACE || !ASTRA_DB_API_ENDPOINT || !ASTRA_DB_APPLICATION_TOKEN) {
+    throw new Error("Missing required AstraDB env variables");
 }
 
-
+const hf = new HfInference(HUGGINGFACE_API_KEY);
 const client = new DataAPIClient(ASTRA_DB_APPLICATION_TOKEN);
-const db = client.db(ASTRA_DB_API_ENDPOINT, { 
-    namespace: ASTRA_DB_NAMESPACE 
+const db = client.db(ASTRA_DB_API_ENDPOINT, {
+    namespace: ASTRA_DB_NAMESPACE
 });
+
+const LLM_MODEL = "mistralai/Mixtral-8x7B-Instruct-v0.1";
+const EMBEDDING_MODEL = "intfloat/e5-large-v2";
 
 interface ErrorResponse {
     error: string;
     details?: string;
 }
 
+function formatUTCDateTime(): string {
+    const now = new Date();
+    return now.toISOString()
+        .replace('T', ' ')
+        .slice(0, 19);
+}
+
+function ensureFlatNumberArray(input: any): number[] {
+    if (!input) {
+        throw new Error('No embedding received');
+    }
+
+    if (Array.isArray(input) && !Array.isArray(input[0])) {
+        return input as number[];
+    }
+
+    if (Array.isArray(input) && Array.isArray(input[0])) {
+        return input[0] as number[];
+    }
+
+    if (input.data && Array.isArray(input.data)) {
+        return input.data as number[];
+    }
+
+    throw new Error('Invalid embedding format received');
+}
+
 export async function POST(req: Request) {
+    const currentDateTime = formatUTCDateTime();
     try {
-        const { messages } = await req.json();
+        const { messages, user = 'iceheadcoder' } = await req.json();
         if (!messages || !Array.isArray(messages)) {
-            throw new Error(" Invalid request: 'messages' must be an array.");
+            throw new Error("Invalid request: 'messages' must be an array");
         }
 
         const latestMessage = messages[messages.length - 1]?.content;
-        if (!latestMessage) throw new Error(" No user message found.");
-
-        let docContext = "";
-
+        if (!latestMessage) throw new Error("No user message found");
         
-        const embeddingResponse = await fetch("https://api.together.xyz/v1/embeddings", {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${TOGETHER_API_KEY}`,
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ inputs: [latestMessage] })
-        });
+        let relevantDocuments: Array<{
+            content: string;
+            similarity: number;
+            index: number;
+        }> = [];
 
-        if (!embeddingResponse.ok) {
-            const errorText = await embeddingResponse.text();
-            console.error("TOGETHER API Error:", errorText);
-            throw new Error("Failed to fetch embeddings.");
-        }
-
-        const embeddingData = await embeddingResponse.json();
-        if (!embeddingData?.embeddings?.length) {
-            throw new Error("TOGETHER returned an invalid response.");
-        }
-
-        const embedding = embeddingData.embeddings[0];
-
-        
         try {
-            const collection = await db.collection(ASTRA_DB_COLLECTION);
-            const cursor = await collection.find({}, {
-                sort: {
-                    $vector: embedding as number[]
-                },
-                limit: 5
+            console.log(`[${currentDateTime}] Processing query for user ${user}`);
+
+            const rawEmbedding = await hf.featureExtraction({
+                model: EMBEDDING_MODEL,
+                inputs: latestMessage,
             });
 
-            const documents = await cursor.toArray();
-            docContext = JSON.stringify(documents.map(doc => doc.text ?? ""));
+            const embedding = ensureFlatNumberArray(rawEmbedding);
+
+            if (embedding.length !== 1024) {
+                throw new Error(`Invalid embedding dimension: ${embedding.length}`);
+            }
+
+            console.log(`[${currentDateTime}] Generated embedding vector of length: ${embedding.length}`);
+
+            const collection = await db.collection(ASTRA_DB_COLLECTION);
+            const cursor = await collection.find(
+                {},
+                {
+                    sort: {
+                        $vector: embedding
+                    },
+                    limit: 5,
+                    includeSimilarity: true
+                }
+            );
+
+            const results = await cursor.toArray();
+            relevantDocuments = results
+                .filter(doc => doc.$similarity && doc.$similarity > 0.7)
+                .map((doc, index) => ({
+                    content: doc.text || "",
+                    similarity: doc.$similarity || 0,
+                    index: index + 1
+                }));
+
+            console.log(`[${currentDateTime}] Found ${relevantDocuments.length} relevant documents`);
+
         } catch (error) {
-            console.error(" DB Error:", error);
-            docContext = "";
+            console.error(`[${currentDateTime}] Search error for user ${user}:`, error);
+            relevantDocuments = [];
         }
 
-       
+        const formattedContext = relevantDocuments.length > 0
+            ? relevantDocuments.map(doc => doc.content).join('\n\n')
+            : "No relevant documents found.";
+
         const encoder = new TextEncoder();
         const stream = new TransformStream();
         const writer = stream.writable.getWriter();
 
-        
         (async () => {
             try {
-                
                 const initialMessage = {
                     id: Date.now().toString(),
                     role: 'assistant' as const,
                     content: '',
                     createdAt: new Date(),
+                    timestamp: currentDateTime,
+                    user: user
                 };
                 await writer.write(encoder.encode(`data: ${JSON.stringify(initialMessage)}\n\n`));
 
                 let accumulatedContent = '';
-                const result = await together.chat.completions.create({
-                    model: "deepseek-ai/DeepSeek-R1-Distill-Llama-70B-free",
-                    messages: [
-                        {
-                            "role": "system",
-                            "content": `You are an AI assistant specializing in Formula One.
-                            Use the below context to augment your knowledge based on Latest Information
-                            prioritizing the **2024 season**.
-                            Do NOT mention sources or missing information.
-                            Always be kind and ask if the user needs any help.
 
-                            ------------------------
-                            START CONTEXT
-                            ${docContext}
-                            END CONTEXT
-                            ------------------------
+                const systemPrompt = `You are F1GPT, a Formula 1 expert assistant. Ensure all responses are well-formatted with proper spacing.
 
-                            QUESTION: ${latestMessage}
-                            ------------------------`
-                        },
-                        ...messages
-                    ],
+Context:
+${formattedContext}
+
+Question: ${latestMessage}
+
+Response Guidelines:
+1. Keep responses natural and direct
+2. Never mention the source of information
+3. Add proper spacing between words
+4. Keep paragraphs clear and readable
+5. Always use proper punctuation
+6. Never start with "Based on the available documents"
+
+Your response:`;
+
+                const response = await hf.textGenerationStream({
+                    model: LLM_MODEL,
+                    inputs: `[INST]${systemPrompt}[/INST]`,
+                    parameters: {
+                        max_new_tokens: 1000,
+                        temperature: 0.3,
+                        top_p: 0.95,
+                        repetition_penalty: 1.1,
+                        stop_sequences: ["</s>", "<s>", "[INST]", "[/INST]"]
+                    }
                 });
 
-                for await (const chunk of result.choices) {
-                    accumulatedContent += chunk;
-                    const data = {
-                        id: Date.now().toString(),
-                        role: 'assistant' as const,
-                        content: accumulatedContent,
-                        createdAt: new Date(),
-                    };
-                    
-                    await writer.write(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+                for await (const chunk of response) {
+                    if (chunk.token.text) {
+                        accumulatedContent += chunk.token.text;
+                        accumulatedContent = accumulatedContent.replace(/<\/s>$/, '');
+                        const data = {
+                            id: Date.now().toString(),
+                            role: 'assistant' as const,
+                            content: accumulatedContent.trim(),
+                            createdAt: new Date(),
+                            timestamp: currentDateTime,
+                            user: user
+                        };
+
+                        await writer.write(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+                    }
                 }
 
-                
-                await writer.write(encoder.encode('data: [DONE]\n\n'));
+                await writer.write(encoder.encode(`data: [DONE]\n\n`));
             } catch (error) {
-                console.error("Streaming error:", error);
+                console.error(`[${currentDateTime}] Streaming error for user ${user}:`, error);
                 const errorMessage = {
                     id: Date.now().toString(),
                     role: 'assistant' as const,
-                    content: "Sorry, there was an error processing your request.",
+                    content: "Sorry, there was an error processing your request",
                     createdAt: new Date(),
+                    timestamp: currentDateTime,
+                    user: user
                 };
                 await writer.write(encoder.encode(`data: ${JSON.stringify(errorMessage)}\n\n`));
             } finally {
                 await writer.close();
             }
         })().catch(async (error: unknown) => {
-            console.error("Stream processing error:", error);
+            console.error(`[${currentDateTime}] Stream error for user ${user}:`, error);
             const errorMessage = {
                 id: Date.now().toString(),
                 role: 'assistant' as const,
                 content: "Sorry, there was an error processing your request.",
                 createdAt: new Date(),
+                timestamp: currentDateTime,
+                user: user
             };
             await writer.write(encoder.encode(`data: ${JSON.stringify(errorMessage)}\n\n`));
             await writer.close();
@@ -166,21 +218,20 @@ export async function POST(req: Request) {
             headers: {
                 'Content-Type': 'text/event-stream',
                 'Cache-Control': 'no-cache, no-transform',
-                'Connection': 'keep-alive',
+                'Connection': 'keep-alive'
             },
         });
-
     } catch (error: unknown) {
-        console.error("API Error:", error);
+        console.error(`[${currentDateTime}] API Error:`, error);
         const errorResponse: ErrorResponse = {
             error: "Internal Server Error",
-            details: error instanceof Error ? error.message : "Unknown error occurred"
+            details: error instanceof Error ? error.message : "Unknown Error occurred"
         };
-        
+
         return new Response(JSON.stringify(errorResponse), {
             status: 500,
-            headers: { 
-                "Content-Type": "application/json",
+            headers: {
+                "Content-Type": "application/json"
             }
         });
     }

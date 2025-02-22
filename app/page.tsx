@@ -1,7 +1,8 @@
 "use client"
+
 import Image from "next/image";
 import img from "./assets/img.png";
-import Bubble from "./components/Bubble";
+import Bubble from "./components/Bubble"
 import LoadingBubble from "./components/LoadingBubble";
 import PromptSuggestionRow from "./components/PromptSuggestionRow";
 import { useEffect, useRef, useState } from "react";
@@ -12,6 +13,9 @@ interface Message {
   content: string;
   createdAt: Date;
 }
+
+const MAX_INPUT_LENGTH = 1000;
+const REQUEST_TIMEOUT = 30000; // 30 seconds
 
 const Home = () => {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -24,30 +28,41 @@ const Home = () => {
   };
 
   useEffect(() => {
-    console.log("Chat State Updated", { isLoading, input, messages });
     scrollToBottom();
-  }, [isLoading, input, messages]);
-
-  const noMessages = messages.length === 0;
+  }, [messages]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setInput(e.target.value);
+    const value = e.target.value;
+    if (value.length <= MAX_INPUT_LENGTH) {
+      setInput(value);
+    }
   };
+
+  const createMessage = (role: 'user' | 'assistant', content: string): Message => ({
+    id: Date.now().toString(),
+    role,
+    content,
+    createdAt: new Date()
+  });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || isLoading) return;
+    console.log('Submitting input:', input);
+    
+    const trimmedInput = input.trim();
+    if (!trimmedInput || isLoading || trimmedInput.length > MAX_INPUT_LENGTH) {
+      return;
+    }
 
     setIsLoading(true);
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: input.trim(),
-      createdAt: new Date(),
-    };
+    const userMessage = createMessage('user', trimmedInput);
 
+    // Update messages optimistically
     setMessages(prev => [...prev, userMessage]);
     setInput('');
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
 
     try {
       const response = await fetch('/api/chat', {
@@ -58,59 +73,81 @@ const Home = () => {
         body: JSON.stringify({
           messages: [...messages, userMessage],
         }),
+        signal: controller.signal
       });
 
-      if (!response.ok) throw new Error('Network response was not ok');
-      if (!response.body) throw new Error('No response body');
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      if (!response.body) {
+        throw new Error('No response body received');
+      }
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
-      let accumulatedContent = '';
+      let buffer = '';
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          
+          if (done) {
+            break;
+          }
 
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = (accumulatedContent + chunk).split('\n');
-        accumulatedContent = lines.pop() || '';
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            if (data === '[DONE]') continue;
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
+              if (data === '[DONE]') continue;
 
-            try {
-              const parsed: Message = JSON.parse(data);
-              setMessages(prev => {
-                const lastMessage = prev[prev.length - 1];
-                if (lastMessage?.role === 'assistant') {
-                  return [
-                    ...prev.slice(0, -1),
-                    {
-                      ...lastMessage,
-                      content: parsed.content
-                    }
-                  ];
-                }
-                return [...prev, parsed];
-              });
-            } catch (e) {
-              console.error('Error parsing SSE message:', e);
+              try {
+                const parsed: Message = JSON.parse(data);
+                setMessages(prev => {
+                  const lastMessage = prev[prev.length - 1];
+                  if (lastMessage?.role === 'assistant') {
+                    // Update existing assistant message
+                    return [
+                      ...prev.slice(0, -1),
+                      {
+                        ...lastMessage,
+                        content: parsed.content
+                      }
+                    ];
+                  }
+                  // Add new message
+                  return [...prev, parsed];
+                });
+              } catch (parseError) {
+                console.error('Error parsing streaming message:', parseError);
+              }
             }
           }
         }
+      } catch (streamError) {
+        if (streamError instanceof Error && streamError.name === 'AbortError') {
+          console.log('Stream reading aborted');
+          throw new Error('Request timed out');
+        }
+        throw streamError;
+      } finally {
+        reader.releaseLock();
       }
     } catch (error) {
-      console.error('Error in chat:', error);
+      console.error('Chat error:', error);
       setMessages(prev => [
         ...prev,
-        {
-          id: Date.now().toString(),
-          role: 'assistant',
-          content: 'Sorry, there was an error processing your request.',
-          createdAt: new Date(),
-        }
+        createMessage('assistant', 
+          error instanceof Error && error.message === 'Request timed out'
+            ? 'Sorry, the request timed out. Please try again.'
+            : 'Sorry, there was an error processing your request. Please try again.'
+        )
       ]);
     } finally {
       setIsLoading(false);
@@ -118,13 +155,19 @@ const Home = () => {
   };
 
   const handlePrompt = async (promptText: string) => {
+    if (!promptText?.trim() || isLoading) {
+      return;
+    }
     setInput(promptText);
+    
     const submitEvent = {
       preventDefault: () => {},
     } as React.FormEvent<HTMLFormElement>;
     
     await handleSubmit(submitEvent);
   };
+
+  const noMessages = messages.length === 0;
 
   return (
     <main>
@@ -144,11 +187,11 @@ const Home = () => {
           <div className="messages-container">
             {messages.map((message: Message, index: number) => (
               <div 
-                key={`message-wrapper-${index}`}
+                key={`${message.id}-${index}`}
                 className={`message-wrapper ${message.role}`}
               >
                 <Bubble 
-                  key={`message-${index}-${message.role}-${message.content.substring(0, 20)}`} 
+                  key={`bubble-${message.id}`}
                   message={message} 
                 />
                 {index === messages.length - 1 && isLoading && <LoadingBubble />}
@@ -169,6 +212,14 @@ const Home = () => {
           value={input}
           placeholder="Ask me something..."
           disabled={isLoading}
+          maxLength={MAX_INPUT_LENGTH}
+          type="text"
+          onKeyPress={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              handleSubmit(e as unknown as React.FormEvent);
+            }
+          }}
         />
         <button 
           type="submit" 
