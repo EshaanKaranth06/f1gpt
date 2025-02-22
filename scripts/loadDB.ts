@@ -32,7 +32,8 @@ const f1Data: string[] = [
   "https://www.formula1.com/en/results/2024/races",
   "https://en.wikipedia.org/wiki/2024_Formula_One_World_Championship",
   "https://www.formula1.com/en/latest/article/2025-f1-grid-all-the-driver-and-team-line-ups-confirmed-so-far.7yijhWBNHjqKwHTRFEMZUa",
-  "https://en.wikipedia.org/wiki/2025_Formula_One_World_Championship"
+  "https://en.wikipedia.org/wiki/2025_Formula_One_World_Championship",
+  "https://www.formula1.com/en/results/2024/drivers"
 ];
 
 const client = new DataAPIClient(ASTRA_DB_APPLICATION_TOKEN);
@@ -40,8 +41,8 @@ const db = client.db(ASTRA_DB_API_ENDPOINT, { namespace: ASTRA_DB_NAMESPACE });
 
 // Updated Text Splitter with smaller chunk size
 const splitter = new RecursiveCharacterTextSplitter({
-  chunkSize: 4000,  // Reduced chunk size to ensure it's under the limit
-  chunkOverlap: 500,  // Optional: Adjust the overlap to keep context
+  chunkSize: 512,  // Reduced chunk size to ensure it's under the limit
+  chunkOverlap: 100,  // Optional: Adjust the overlap to keep context
 });
 
 const createCollection = async (similarityMetric: SimilarityMetric = "dot_product") => {
