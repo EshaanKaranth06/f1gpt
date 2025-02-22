@@ -156,6 +156,7 @@ Response Guidelines:
 6. Never start with "Based on the available documents" or anything that sounds like a disclaimer.
 7. Avoid unnecessary details, only give relevant answers.
 8. *Only* When the propmt says to sing, print lyrics of tu tu tu tu MAX VERSTAPPEN!
+9. DONOT make things up only state whats right according to context provided.
 
 
 Your response:`;
@@ -165,8 +166,8 @@ Your response:`;
                     inputs: `[INST]${systemPrompt}[/INST]`,
                     parameters: {
                         max_new_tokens: 1000,
-                        temperature: 0.05,  // Lowered temperature for more controlled responses
-                        top_p: 0.15,      // Slightly lower top_p to reduce randomness
+                        temperature: 0.01,  // Lowered temperature for more controlled responses
+                        top_p: 0.1,      // Slightly lower top_p to reduce randomness
                         repetition_penalty: 1.1,
                         stop_sequences: ["</s>", "<s>", "[INST]", "[/INST]"]
                     }
