@@ -156,7 +156,7 @@ Response Guidelines:
 6. Never start with "Based on the available documents" or anything that sounds like a disclaimer.
 7. Avoid unnecessary details, only give relevant answers.
 8. *Only* When the propmt says to sing, print lyrics of tu tu tu tu MAX VERSTAPPEN!
-9. when the user asks about **TEAM** answer accordingly.
+
 
 Your response:`;
 
