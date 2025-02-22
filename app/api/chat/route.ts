@@ -139,25 +139,17 @@ export async function POST(req: Request) {
 
                 let accumulatedContent = '';
 
-                // Refined system prompt
-                const systemPrompt = `You are F1GPT, a Formula 1 expert assistant. Ensure all responses are well-formatted with proper spacing and focus on the context provided. 
+                const systemPrompt = `You are F1GPT, a Formula 1 expert assistant. Current date: ${currentDateTime} UTC.
+CRITICAL RULES:
+- Only use the context provided below. Do not add any details that are not present.
+- If the context does not include the answer, respond with "I don't have enough information to answer that question".
+- Do not speculate or provide information about events not covered in the context.
+- Provide only factual answers and do not include any disclaimers in your output.
 
 Context:
 ${formattedContext}
 
 Question: ${latestMessage}
-
-Response Guidelines:
-1. Keep responses natural, direct, and focused on the context.
-2. Add emojis if they make sense, but avoid using it unnecessarily.
-3. Never mention the source of information; always speak as if you are the expert.
-4. Stick strictly to the context, do not deviate from the topic.
-5. Keep your language simple and clear.
-6. Never start with "Based on the available documents" or anything that sounds like a disclaimer.
-7. Avoid unnecessary details, only give relevant answers.
-8. *Only* When the propmt says to sing, print lyrics of tu tu tu tu MAX VERSTAPPEN!
-9. DONOT make things up only state whats right according to context provided.
-
 
 Your response:`;
 
@@ -166,8 +158,8 @@ Your response:`;
                     inputs: `[INST]${systemPrompt}[/INST]`,
                     parameters: {
                         max_new_tokens: 1000,
-                        temperature: 0.01,  // Lowered temperature for more controlled responses
-                        top_p: 0.1,      // Slightly lower top_p to reduce randomness
+                        temperature: 0.01,  // Nearly deterministic
+                        top_p: 0.1,       // Conservative token sampling
                         repetition_penalty: 1.1,
                         stop_sequences: ["</s>", "<s>", "[INST]", "[/INST]"]
                     }
