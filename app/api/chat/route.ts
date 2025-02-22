@@ -1,17 +1,18 @@
-import { createDeepInfra } from "@ai-sdk/deepinfra";
+import Together from "together-ai"
 import { streamText } from "ai";
 import { DataAPIClient } from "@datastax/astra-db-ts";
 
 
-const DEEPINFRA_API_KEY = process.env.DEEPINFRA_API_KEY || '';
+const TOGETHER_API_KEY = process.env.TOGETHER_API_KEY || '';
 const ASTRA_DB_NAMESPACE = process.env.ASTRA_DB_NAMESPACE || '';
 const ASTRA_DB_COLLECTION = process.env.ASTRA_DB_COLLECTION || '';
 const ASTRA_DB_API_ENDPOINT = process.env.ASTRA_DB_API_ENDPOINT || '';
 const ASTRA_DB_APPLICATION_TOKEN = process.env.ASTRA_DB_APPLICATION_TOKEN || '';
 
+const together = new Together()
 
-if (!DEEPINFRA_API_KEY) {
-    throw new Error(" Missing DeepInfra API key");
+if (!TOGETHER_API_KEY) {
+    throw new Error(" Missing Together API key");
 }
 
 if (!ASTRA_DB_NAMESPACE || !ASTRA_DB_COLLECTION || !ASTRA_DB_API_ENDPOINT || !ASTRA_DB_APPLICATION_TOKEN) {
@@ -19,16 +20,10 @@ if (!ASTRA_DB_NAMESPACE || !ASTRA_DB_COLLECTION || !ASTRA_DB_API_ENDPOINT || !AS
 }
 
 
-const deepinfra = createDeepInfra({
-    apiKey: DEEPINFRA_API_KEY
-});
-
 const client = new DataAPIClient(ASTRA_DB_APPLICATION_TOKEN);
 const db = client.db(ASTRA_DB_API_ENDPOINT, { 
     namespace: ASTRA_DB_NAMESPACE 
 });
-
-const LLM_MODEL = "mistralai/Mistral-7B-Instruct-v0.3";
 
 interface ErrorResponse {
     error: string;
@@ -48,10 +43,10 @@ export async function POST(req: Request) {
         let docContext = "";
 
         
-        const embeddingResponse = await fetch("https://api.deepinfra.com/v1/inference/intfloat/e5-large-v2", {
+        const embeddingResponse = await fetch("https://api.together.xyz/v1/embeddings", {
             method: "POST",
             headers: {
-                "Authorization": `Bearer ${DEEPINFRA_API_KEY}`,
+                "Authorization": `Bearer ${TOGETHER_API_KEY}`,
                 "Content-Type": "application/json",
             },
             body: JSON.stringify({ inputs: [latestMessage] })
@@ -59,13 +54,13 @@ export async function POST(req: Request) {
 
         if (!embeddingResponse.ok) {
             const errorText = await embeddingResponse.text();
-            console.error("DeepInfra API Error:", errorText);
+            console.error("TOGETHER API Error:", errorText);
             throw new Error("Failed to fetch embeddings.");
         }
 
         const embeddingData = await embeddingResponse.json();
         if (!embeddingData?.embeddings?.length) {
-            throw new Error("DeepInfra returned an invalid response.");
+            throw new Error("TOGETHER returned an invalid response.");
         }
 
         const embedding = embeddingData.embeddings[0];
@@ -105,12 +100,12 @@ export async function POST(req: Request) {
                 await writer.write(encoder.encode(`data: ${JSON.stringify(initialMessage)}\n\n`));
 
                 let accumulatedContent = '';
-                const result = await streamText({
-                    model: deepinfra(LLM_MODEL),
+                const result = await together.chat.completions.create({
+                    model: "deepseek-ai/DeepSeek-R1-Distill-Llama-70B-free",
                     messages: [
                         {
-                            role: "system",
-                            content: `You are an AI assistant specializing in Formula One.
+                            "role": "system",
+                            "content": `You are an AI assistant specializing in Formula One.
                             Use the below context to augment your knowledge based on Latest Information
                             prioritizing the **2024 season**.
                             Do NOT mention sources or missing information.
@@ -129,7 +124,7 @@ export async function POST(req: Request) {
                     ],
                 });
 
-                for await (const chunk of result.textStream) {
+                for await (const chunk of result.choices) {
                     accumulatedContent += chunk;
                     const data = {
                         id: Date.now().toString(),
