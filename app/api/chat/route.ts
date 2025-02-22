@@ -147,13 +147,13 @@ ${formattedContext}
 Question: ${latestMessage}
 
 Response Guidelines:
-1. Keep responses natural and direct
+1. Keep responses natural, direct and add emojis when required
 2. Never mention the source of information
 3. Add proper spacing between words
 4. Keep paragraphs clear and readable
 5. Always use proper punctuation
 6. Never start with "Based on the available documents"
-7. Only when explicitly asked to sing du du du du MAX VERSTAPPEN print the lyrics
+
 
 Your response:`;
 
