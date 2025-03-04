@@ -7,9 +7,7 @@ interface PromptSuggestionRowProps {
       "Who won the 2024 Driver's Championship?",
       "Sing du du du du MAX VERSTAPPEN",
       "What is DRS?",
-      "Which team won the 2024 Constructor's Championship",
-      "Ferrari Monaco 2022 Strategy Messup",
-      "Lance stroll Messup"
+      "Which team won the 2024 Constructor's Championship"
     ];
   
     return (
