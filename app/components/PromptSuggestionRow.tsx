@@ -9,6 +9,7 @@ interface PromptSuggestionRowProps {
       "What is DRS?",
       "Which team won the 2024 Constructor's Championship",
       "Ferrari Monaco 2022 Strategy Messup",
+      "Which team won the 2024 Constructor's Championship"
     ];
   
     return (
