@@ -106,7 +106,7 @@ const scrapePage = async (url: string): Promise<string | null> => {
       },
     });
     const content = await loader.scrape();
-    return content ? content.replace(/<[^>]*>?/gm, "") : null;
+    return content ? content.replace(/<[^>]*>?/gm, "") : null; //regex for removing html tags
   } catch (error: unknown) {
     console.error(`Error scraping page ${url}:`, error);
     return null;
