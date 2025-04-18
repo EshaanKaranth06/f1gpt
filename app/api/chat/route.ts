@@ -163,7 +163,7 @@ Your response:`;
                         temperature: 0.01,  // Nearly deterministic
                         top_p: 0.1,       // Conservative token sampling
                         repetition_penalty: 1.1,
-                        stop_sequences: ["</s>", "<s>", "[INST]", "[/INST]"]
+                        stop_sequences: ["</s>"]
                     }
                 });
 
