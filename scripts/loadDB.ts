@@ -38,7 +38,8 @@ const f1Data: string[] = [
   "https://www.formula1.com/en/racing/2025",
   "https://en.wikipedia.org/wiki/2025_Formula_One_World_Championship",
   "https://www.formula1.com/en/results/2025/drivers",
-  "https://www.formula1.com/en/latest/article/the-beginners-guide-to-the-formula-1-grand-prix-calendar.VEmteiTb3F3tE95A7qke7"
+  "https://www.formula1.com/en/latest/article/the-beginners-guide-to-the-formula-1-grand-prix-calendar.VEmteiTb3F3tE95A7qke7",
+  "https://www.formula1.com/en/results/2025/races"
 ];
 
 const client = new DataAPIClient(ASTRA_DB_APPLICATION_TOKEN);
