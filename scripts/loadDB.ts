@@ -34,7 +34,11 @@ const f1Data: string[] = [
   "https://www.formula1.com/en/latest/article/2025-f1-grid-all-the-driver-and-team-line-ups-confirmed-so-far.7yijhWBNHjqKwHTRFEMZUa",
   "https://en.wikipedia.org/wiki/2025_Formula_One_World_Championship",
   "https://www.formula1.com/en/results/2024/drivers",
-  "https://www.motorsportmagazine.com/articles/single-seaters/f1/2025-f1-driver-line-ups-latest-contract-news-and-rumours/"
+  "https://www.motorsportmagazine.com/articles/single-seaters/f1/2025-f1-driver-line-ups-latest-contract-news-and-rumours/",
+  "https://www.formula1.com/en/racing/2025",
+  "https://en.wikipedia.org/wiki/2025_Formula_One_World_Championship",
+  "https://www.formula1.com/en/results/2025/drivers",
+  "https://www.formula1.com/en/latest/article/the-beginners-guide-to-the-formula-1-grand-prix-calendar.VEmteiTb3F3tE95A7qke7"
 ];
 
 const client = new DataAPIClient(ASTRA_DB_APPLICATION_TOKEN);
