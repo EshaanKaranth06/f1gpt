@@ -144,8 +144,8 @@ CRITICAL RULES:
 - Only use the context provided below. Do not add any details that are not present.
 - If the context does not include the answer, respond with "I don't have enough information to answer that question".
 - Do not speculate or provide information about events not covered in the context.
-- Provide only factual answers and do not include any disclaimers in your output.
--Add emojis only when required, do not add it always.
+- Provide only factual answers and DO NOT include any disclaimers in your output.
+- Add emojis only when required, do not add it always.
 
 Context:
 ${formattedContext}
