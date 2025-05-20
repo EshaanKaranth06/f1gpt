@@ -158,13 +158,12 @@ Your response:`;
 
                 const response = await hf.textGenerationStream({
                     model: LLM_MODEL,
-                    inputs: `[INST]${systemPrompt}[/INST]`,
+                    inputs: `<s>[INST] ${systemPrompt} [/INST]`,
                     parameters: {
                         max_new_tokens: 1000,
                         temperature: 1,  // Nearly deterministic
                         top_p: 1,       // Conservative token sampling
-                        repetition_penalty: 1.1,
-                        stop_sequences: ["</s>"]
+                        repetition_penalty: 1.1
                     }
                 });
 
