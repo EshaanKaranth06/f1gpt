@@ -186,7 +186,7 @@ Your response:`;
 
                 await writer.write(encoder.encode(`data: [DONE]\n\n`));
             } catch (error) {
-                console.error(`[${currentDateTime}] Streaming error for user ${user}:`, error);
+                console.error(`[${currentDateTime}] Streaming error for user ${user}:`, JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
                 const errorMessage = {
                     id: Date.now().toString(),
                     role: 'assistant' as const,
@@ -200,7 +200,7 @@ Your response:`;
                 await writer.close();
             }
         })().catch(async (error: unknown) => {
-            console.error(`[${currentDateTime}] Stream error for user ${user}:`, error);
+            console.error(`[${currentDateTime}] Stream error for user ${user}:`, JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
             const errorMessage = {
                 id: Date.now().toString(),
                 role: 'assistant' as const,
