@@ -78,7 +78,8 @@ export async function POST(req: Request) {
 
             const rawEmbedding = await hf.featureExtraction({
                 model: EMBEDDING_MODEL,
-                inputs: latestMessage,
+                inputs: `query: ${latestMessage}`,
+
             });
 
             const embedding = ensureFlatNumberArray(rawEmbedding);
@@ -105,7 +106,7 @@ export async function POST(req: Request) {
             relevantDocuments = results
                 .filter(doc => doc.$similarity && doc.$similarity > 0.7)
                 .map((doc, index) => ({
-                    content: doc.text || "",
+                    content: doc.text || doc.content || "",
                     similarity: doc.$similarity || 0,
                     index: index + 1
                 }));
