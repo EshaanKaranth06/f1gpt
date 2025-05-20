@@ -160,8 +160,8 @@ Your response:`;
                     inputs: `[INST]${systemPrompt}[/INST]`,
                     parameters: {
                         max_new_tokens: 1000,
-                        temperature: 0.01,  // Nearly deterministic
-                        top_p: 0.1,       // Conservative token sampling
+                        temperature: 1,  // Nearly deterministic
+                        top_p: 1,       // Conservative token sampling
                         repetition_penalty: 1.1,
                         stop_sequences: ["</s>"]
                     }
