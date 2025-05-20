@@ -16,7 +16,7 @@ if (!ASTRA_DB_NAMESPACE || !ASTRA_DB_COLLECTION || !ASTRA_DB_API_ENDPOINT || !AS
   throw new Error("Missing required environment variables.");
 }
 
-const MODEL = "intfloat/e5-large-v2";
+const MODEL = "BAAI/bge-large-en-v1.5";
 const huggingfaceClient = new HfInference(HUGGINGFACE_API_KEY);
 
 const f1Data: string[] = [
