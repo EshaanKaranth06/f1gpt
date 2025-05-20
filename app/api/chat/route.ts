@@ -140,7 +140,17 @@ export async function POST(req: Request) {
 
                 let accumulatedContent = '';
 
-                const systemPrompt = `You are F1GPT, a Formula 1 expert assistant. Current date: ${currentDateTime} UTC.
+                const prunedMessages = messages.slice(-10);  // 🔥 Last 10 turns of convo
+                const latestMessage = prunedMessages[prunedMessages.length - 1]?.content || '';
+
+                const history = prunedMessages.slice(0, -1).map(msg => {
+                    if (msg.role === 'user') return `User: ${msg.content}`;
+                    if (msg.role === 'assistant') return `Assistant: ${msg.content}`;
+                    return '';
+                }).filter(Boolean).join('\n');
+
+        const systemPrompt = `<s>[INST]
+You are F1GPT, a Formula 1 expert assistant. Current date: ${currentDateTime} UTC.
 CRITICAL RULES:
 - Only use the context provided below. Do not add any details that are not present.
 - If the context does not include the answer, respond with "I don't have enough information to answer that question".
@@ -152,17 +162,20 @@ CRITICAL RULES:
 Context:
 ${formattedContext}
 
-Question: ${latestMessage}
+Conversation so far:
+${history}
 
-Your response:`;
+Now answer this:
+User: ${latestMessage}
+[/INST]`;
 
                 const response = await hf.textGenerationStream({
                     model: LLM_MODEL,
                     inputs: `${systemPrompt}`,
                     parameters: {
                         max_new_tokens: 1000,
-                        temperature: 1,  // Nearly deterministic
-                        top_p: 1,       // Conservative token sampling
+                        temperature: 1, 
+                        top_p: 1,       
                         repetition_penalty: 1.1
                     }
                 });
@@ -170,7 +183,7 @@ Your response:`;
                 for await (const chunk of response) {
                     if (chunk.token.text) {
                         accumulatedContent += chunk.token.text;
-                        accumulatedContent = accumulatedContent.replace(/<\/s>$/, '');
+                        accumulatedContent = accumulatedContent.replace(/<\/s>/g, '');
                         const data = {
                             id: Date.now().toString(),
                             role: 'assistant' as const,
