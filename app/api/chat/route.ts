@@ -158,7 +158,7 @@ Your response:`;
 
                 const response = await hf.textGenerationStream({
                     model: LLM_MODEL,
-                    inputs: `<s>[INST] ${systemPrompt} [/INST]`,
+                    inputs: `${systemPrompt}`,
                     parameters: {
                         max_new_tokens: 1000,
                         temperature: 1,  // Nearly deterministic
