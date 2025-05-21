@@ -172,8 +172,8 @@ User: ${latestMessage}
                     inputs: systemPrompt,
                     parameters: {
                         max_new_tokens: 1000,
-                        temperature: 1,
-                        top_p: 1,
+                        temperature: 0.8,
+                        top_p: 0.7,
                         repetition_penalty: 1.1
                     }
                 });
