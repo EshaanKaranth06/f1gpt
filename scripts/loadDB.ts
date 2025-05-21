@@ -1,16 +1,18 @@
 import { DataAPIClient } from "@datastax/astra-db-ts";
 import { PuppeteerWebBaseLoader } from "@langchain/community/document_loaders/web/puppeteer";
-import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
+import { MarkdownTextSplitter } from "langchain/text_splitter";
 import { HfInference } from "@huggingface/inference";
 import "dotenv/config";
 
 type SimilarityMetric = "dot_product" | "cosine" | "euclidean";
 
-const ASTRA_DB_NAMESPACE = process.env.ASTRA_DB_NAMESPACE;
-const ASTRA_DB_COLLECTION = process.env.ASTRA_DB_COLLECTION;
-const ASTRA_DB_API_ENDPOINT = process.env.ASTRA_DB_API_ENDPOINT;
-const ASTRA_DB_APPLICATION_TOKEN = process.env.ASTRA_DB_APPLICATION_TOKEN;
-const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY;
+const {
+  ASTRA_DB_NAMESPACE,
+  ASTRA_DB_COLLECTION,
+  ASTRA_DB_API_ENDPOINT,
+  ASTRA_DB_APPLICATION_TOKEN,
+  HUGGINGFACE_API_KEY,
+} = process.env;
 
 if (!ASTRA_DB_NAMESPACE || !ASTRA_DB_COLLECTION || !ASTRA_DB_API_ENDPOINT || !ASTRA_DB_APPLICATION_TOKEN || !HUGGINGFACE_API_KEY) {
   throw new Error("Missing required environment variables.");
@@ -52,10 +54,10 @@ const f1Data: string[] = [
 const client = new DataAPIClient(ASTRA_DB_APPLICATION_TOKEN);
 const db = client.db(ASTRA_DB_API_ENDPOINT, { namespace: ASTRA_DB_NAMESPACE });
 
-// Updated Text Splitter with smaller chunk size
-const splitter = new RecursiveCharacterTextSplitter({
-  chunkSize: 512,  // Reduced chunk size to ensure it's under the limit
-  chunkOverlap: 100,  // Optional: Adjust the overlap to keep context
+
+const splitter = new MarkdownTextSplitter({
+  chunkSize: 1024,  
+  chunkOverlap: 100,  
 });
 
 const createCollection = async (similarityMetric: SimilarityMetric = "dot_product") => {
@@ -100,7 +102,7 @@ const loadSampleData = async () => {
 
         const res = await collection.insertOne({
           $vector: vector,
-          text: chunk,  // Store the smaller chunk of text
+          text: chunk, 
           url
         });
         console.log(res);
