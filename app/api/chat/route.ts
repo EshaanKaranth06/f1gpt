@@ -3,7 +3,7 @@ import { DataAPIClient } from "@datastax/astra-db-ts";
 
 const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY || '';
 const ASTRA_DB_NAMESPACE = process.env.ASTRA_DB_NAMESPACE || '';
-const ASTRA_DB_COLLECTION = 'f1gpt2';
+const ASTRA_DB_COLLECTION = 'f1gpt1';
 const ASTRA_DB_API_ENDPOINT = process.env.ASTRA_DB_API_ENDPOINT || '';
 const ASTRA_DB_APPLICATION_TOKEN = process.env.ASTRA_DB_APPLICATION_TOKEN || '';
 
@@ -148,10 +148,9 @@ export async function POST(req: Request) {
                 const systemPrompt = `<s>[INST]
 You are F1GPT, a Formula 1 expert assistant. Current date: ${currentDateTime} UTC.
 CRITICAL RULES:
-- Only use the context provided below. Do not add any details that are not present.
-- If the context does not include the answer, respond with "I don't have enough information to answer that question".
-- DO NOT reference events after the current date (${currentDateTime}) unless they are explicitly in the context.
-- Do not speculate or provide information about events not covered in the context.
+- Use the context provided below as the primary source of information.
+- If the context does not include the answer, you may provide information about events that occurred in 2025 up to the current date (${currentDateTime}) if known.
+- Do not speculate or provide information about events not covered in the context or after the current date.
 - Provide only factual answers and DO NOT include any disclaimers in your output.
 - Add emojis only when required, do not add it always.
 
@@ -172,7 +171,7 @@ User: ${latestMessage}
                     inputs: systemPrompt,
                     parameters: {
                         max_new_tokens: 1000,
-                        temperature: 0.8,
+                        temperature: 0.9,
                         top_p: 0.7,
                         repetition_penalty: 1.1
                     }
