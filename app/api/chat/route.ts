@@ -79,7 +79,7 @@ export async function POST(req: Request) {
             console.log(`[${currentDateTime}] Processing query for user ${user}: ${latestMessage}`);
             const rawEmbedding = await hf.featureExtraction({
                 model: EMBEDDING_MODEL,
-                inputs: `query: ${latestMessage}`,
+                inputs: `Represent this question for retrieval: ${latestMessage}`,
             });
             console.log(`[${currentDateTime}] Raw embedding:`, rawEmbedding);
 
@@ -94,7 +94,7 @@ export async function POST(req: Request) {
                 {} as any,
                 {
                     sort: { $vector: embedding },
-                    limit: 5,
+                    limit: 3,
                     includeSimilarity: true
                 }
             );
@@ -102,9 +102,9 @@ export async function POST(req: Request) {
             console.log(`[${currentDateTime}] AstraDB results:`, results);
 
             relevantDocuments = results
-                .filter(doc => doc.$similarity && doc.$similarity > 0.7)
+                .filter(doc => doc.$similarity && doc.$similarity > 0.5)
                 .map((doc, index) => ({
-                    content: doc.text || doc.content || "",
+                    content: (doc.text || doc.content || "").slice(0,250),
                     similarity: doc.$similarity || 0,
                     index: index + 1
                 }));
@@ -116,7 +116,7 @@ export async function POST(req: Request) {
         }
 
         const formattedContext = relevantDocuments.length > 0
-            ? relevantDocuments.map(doc => doc.content).join('\n\n')
+            ? relevantDocuments.map(doc => doc.content).join('\n\n').slice(0,1000)
             : "No relevant documents found.";
 
         const encoder = new TextEncoder();
@@ -145,11 +145,14 @@ export async function POST(req: Request) {
                     return '';
                 }).filter(Boolean).join('\n');
 
+                const maxTokens = 500;
                 const systemPrompt = `<s>[INST]
 You are F1GPT, a Formula 1 expert assistant. Current date: ${currentDateTime} UTC.
 CRITICAL RULES:
+- Give Responses in SMALL PARAGRAPHS.
 - Use the context provided below as the primary source of information.
 - If the context does not include the answer, you may provide information about events that occurred in 2025 up to the current date (${currentDateTime}) if known.
+- Provide concise, factual answers under ${maxTokens} tokens.
 - Do not speculate or provide information about events not covered in the context or after the current date.
 - Provide only factual answers and DO NOT include any disclaimers in your output.
 - Add emojis only when required, do not add it always.
@@ -170,10 +173,10 @@ User: ${latestMessage}
                     model: LLM_MODEL,
                     inputs: systemPrompt,
                     parameters: {
-                        max_new_tokens: 1000,
-                        temperature: 0.9,
-                        top_p: 0.7,
-                        repetition_penalty: 1.1
+                        max_new_tokens: 500,
+                        temperature: 0.5,
+                        top_p: 0.9,
+                        repetition_penalty: 1.0
                     }
                 });
 
@@ -226,7 +229,8 @@ User: ${latestMessage}
             headers: {
                 'Content-Type': 'text/event-stream',
                 'Cache-Control': 'no-cache, no-transform',
-                'Connection': 'keep-alive'
+                'Connection': 'keep-alive',
+                'X-Accel-Buffering': 'no'
             },
         });
     } catch (error: unknown) {

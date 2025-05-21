@@ -39,7 +39,14 @@ const f1Data: string[] = [
   "https://en.wikipedia.org/wiki/2025_Formula_One_World_Championship",
   "https://www.formula1.com/en/results/2025/drivers",
   "https://www.formula1.com/en/latest/article/the-beginners-guide-to-the-formula-1-grand-prix-calendar.VEmteiTb3F3tE95A7qke7",
-  "https://www.formula1.com/en/results/2025/races"
+  "https://www.formula1.com/en/results/2025/races",
+  "https://www.formula1.com/en/results/2025/races/1254/australia/race-result",
+  "https://www.formula1.com/en/results/2025/races/1255/china/race-result",
+  "https://www.formula1.com/en/results/2025/races/1256/japan/race-result",
+  "https://www.formula1.com/en/results/2025/races/1257/bahrain/race-result",
+  "https://www.formula1.com/en/results/2025/races/1258/saudi-arabia/race-result",
+  "https://www.formula1.com/en/results/2025/races/1259/miami/race-result",
+  "https://www.formula1.com/en/results/2025/races/1260/emilia-romagna/race-result"
 ];
 
 const client = new DataAPIClient(ASTRA_DB_APPLICATION_TOKEN);
@@ -81,11 +88,14 @@ const loadSampleData = async () => {
     }
 
     const content = await scrapePage(url);
-    if (content) {
+    if (content) { 
       const chunks = await splitter.splitText(content);  // Split content into smaller chunks
 
       for await (const chunk of chunks) {
-        const output = await huggingfaceClient.featureExtraction({ model: MODEL, inputs: chunk });
+        const output = await huggingfaceClient.featureExtraction({
+                  model: MODEL,
+                  inputs: `Represent this passage for retrieval: ${chunk}`,
+        });
         const vector = output as number[];
 
         const res = await collection.insertOne({
