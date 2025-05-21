@@ -59,14 +59,16 @@ function ensureFlatNumberArray(input: any): number[] {
 export async function POST(req: Request) {
     const currentDateTime = formatUTCDateTime();
     try {
-        const { messages, user = 'iceheadcoder' } = await req.json();
+        const body = await req.json();
+        console.log(`[${currentDateTime}] Request body:`, body);
+        const { messages, user = 'iceheadcoder' } = body;
         if (!messages || !Array.isArray(messages)) {
             throw new Error("Invalid request: 'messages' must be an array");
         }
 
         const latestMessage = messages[messages.length - 1]?.content;
         if (!latestMessage) throw new Error("No user message found");
-        
+
         let relevantDocuments: Array<{
             content: string;
             similarity: number;
@@ -74,35 +76,31 @@ export async function POST(req: Request) {
         }> = [];
 
         try {
-            console.log(`[${currentDateTime}] Processing query for user ${user}`);
-
+            console.log(`[${currentDateTime}] Processing query for user ${user}: ${latestMessage}`);
             const rawEmbedding = await hf.featureExtraction({
                 model: EMBEDDING_MODEL,
                 inputs: `query: ${latestMessage}`,
-
             });
+            console.log(`[${currentDateTime}] Raw embedding:`, rawEmbedding);
 
             const embedding = ensureFlatNumberArray(rawEmbedding);
-
             if (embedding.length !== 1024) {
                 throw new Error(`Invalid embedding dimension: ${embedding.length}`);
             }
-
             console.log(`[${currentDateTime}] Generated embedding vector of length: ${embedding.length}`);
 
             const collection = await db.collection(ASTRA_DB_COLLECTION);
             const cursor = await collection.find(
-                {} as any, // Add appropriate filters if needed
+                {} as any,
                 {
-                    sort: {
-                        $vector: embedding
-                    },
+                    sort: { $vector: embedding },
                     limit: 5,
                     includeSimilarity: true
                 }
             );
-
             const results = await cursor.toArray();
+            console.log(`[${currentDateTime}] AstraDB results:`, results);
+
             relevantDocuments = results
                 .filter(doc => doc.$similarity && doc.$similarity > 0.7)
                 .map((doc, index) => ({
@@ -112,9 +110,8 @@ export async function POST(req: Request) {
                 }));
 
             console.log(`[${currentDateTime}] Found ${relevantDocuments.length} relevant documents`);
-
         } catch (error) {
-            console.error(`[${currentDateTime}] Search error for user ${user}:`, error);
+            console.error(`[${currentDateTime}] Search error for user ${user}:`, JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
             relevantDocuments = [];
         }
 
@@ -140,16 +137,15 @@ export async function POST(req: Request) {
 
                 let accumulatedContent = '';
 
-                const prunedMessages = messages.slice(-10);  // 🔥 Last 10 turns of convo
+                const prunedMessages = messages.slice(-10);
                 const latestMessage = prunedMessages[prunedMessages.length - 1]?.content || '';
-
                 const history = prunedMessages.slice(0, -1).map(msg => {
                     if (msg.role === 'user') return `User: ${msg.content}`;
                     if (msg.role === 'assistant') return `Assistant: ${msg.content}`;
                     return '';
                 }).filter(Boolean).join('\n');
 
-        const systemPrompt = `<s>[INST]
+                const systemPrompt = `<s>[INST]
 You are F1GPT, a Formula 1 expert assistant. Current date: ${currentDateTime} UTC.
 CRITICAL RULES:
 - Only use the context provided below. Do not add any details that are not present.
@@ -169,13 +165,15 @@ Now answer this:
 User: ${latestMessage}
 [/INST]`;
 
+                console.log(`[${currentDateTime}] System prompt:`, systemPrompt);
+
                 const response = await hf.textGenerationStream({
                     model: LLM_MODEL,
-                    inputs: `${systemPrompt}`,
+                    inputs: systemPrompt,
                     parameters: {
                         max_new_tokens: 1000,
-                        temperature: 1, 
-                        top_p: 1,       
+                        temperature: 1,
+                        top_p: 1,
                         repetition_penalty: 1.1
                     }
                 });
@@ -192,7 +190,6 @@ User: ${latestMessage}
                             timestamp: currentDateTime,
                             user: user
                         };
-
                         await writer.write(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
                     }
                 }
@@ -234,17 +231,14 @@ User: ${latestMessage}
             },
         });
     } catch (error: unknown) {
-        console.error(`[${currentDateTime}] API Error:`, error);
+        console.error(`[${currentDateTime}] API Error:`, JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
         const errorResponse: ErrorResponse = {
             error: "Internal Server Error",
             details: error instanceof Error ? error.message : "Unknown Error occurred"
         };
-
         return new Response(JSON.stringify(errorResponse), {
             status: 500,
-            headers: {
-                "Content-Type": "application/json"
-            }
+            headers: { "Content-Type": "application/json" }
         });
     }
 }
