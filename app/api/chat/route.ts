@@ -128,7 +128,7 @@ export async function POST(req: Request) {
 
             const keepAlive = setInterval(() => {
                 writer.write(encoder.encode(`event: ping\ndata: heartbeat\n\n`));
-            }, 15000); // 👈 Keeps the connection alive every 15s
+            }, 15000); 
 
             try {
                 const initialMessage = {
