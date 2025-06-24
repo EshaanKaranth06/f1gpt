@@ -1,3 +1,4 @@
+export const runtime = "nodejs";
 import { HfInference } from '@huggingface/inference';
 import { DataAPIClient } from "@datastax/astra-db-ts";
 
@@ -124,6 +125,11 @@ export async function POST(req: Request) {
         const writer = stream.writable.getWriter();
 
         (async () => {
+
+            const keepAlive = setInterval(() => {
+                writer.write(encoder.encode(`event: ping\ndata: heartbeat\n\n`));
+            }, 15000); // 👈 Keeps the connection alive every 15s
+
             try {
                 const initialMessage = {
                     id: Date.now().toString(),
@@ -134,6 +140,7 @@ export async function POST(req: Request) {
                     user: user
                 };
                 await writer.write(encoder.encode(`data: ${JSON.stringify(initialMessage)}\n\n`));
+                await writer.write(encoder.encode(`event: ping\ndata: init-flush\n\n`));
 
                 let accumulatedContent = '';
 
