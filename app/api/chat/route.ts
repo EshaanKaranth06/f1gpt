@@ -1,198 +1,246 @@
-// @/app/api/chat/route.ts
-
-import { InferenceClient } from "@huggingface/inference"; // ⚠️ CHANGED from HfInference
-import { DataAPIClient } from "@datastax/astra-db-ts";
-import { NextRequest } from 'next/server';
-
 export const runtime = "nodejs";
+import { HfInference } from '@huggingface/inference';
+import { DataAPIClient } from "@datastax/astra-db-ts";
 
-// --- CONFIGURATION ---
+const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY || '';
+const ASTRA_DB_NAMESPACE = process.env.ASTRA_DB_NAMESPACE || '';
 const ASTRA_DB_COLLECTION = 'f1gpt';
-const LLM_MODEL = "HuggingFaceTB/SmolLM3-3B";
-const EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5";
-const EMBEDDING_DIMENSION = 1024;
-const SIMILARITY_THRESHOLD = 0.5;
-const MAX_CONTEXT_LENGTH = 1000;
-const MAX_NEW_TOKENS = 500;
-const MAX_HISTORY_MESSAGES = 10;
-const KEEPALIVE_INTERVAL_MS = 15000;
+const ASTRA_DB_API_ENDPOINT = process.env.ASTRA_DB_API_ENDPOINT || '';
+const ASTRA_DB_APPLICATION_TOKEN = process.env.ASTRA_DB_APPLICATION_TOKEN || '';
 
-// --- ASTRA DB & HUGGING FACE CLIENT INITIALIZATION ---
-const {
-    HUGGINGFACE_API_KEY,
-    ASTRA_DB_NAMESPACE,
-    ASTRA_DB_API_ENDPOINT,
-    ASTRA_DB_APPLICATION_TOKEN
-} = process.env;
-
-if (!HUGGINGFACE_API_KEY || !ASTRA_DB_NAMESPACE || !ASTRA_DB_API_ENDPOINT || !ASTRA_DB_APPLICATION_TOKEN) {
-    throw new Error("Missing required environment variables for Hugging Face or AstraDB.");
+if (!HUGGINGFACE_API_KEY) {
+    throw new Error("Missing Hugging Face API key");
 }
 
-// ⚠️ CHANGED to the newer InferenceClient
-const hf = new InferenceClient(HUGGINGFACE_API_KEY);
-const db = new DataAPIClient(ASTRA_DB_APPLICATION_TOKEN).db(ASTRA_DB_API_ENDPOINT, {
+if (!ASTRA_DB_NAMESPACE || !ASTRA_DB_API_ENDPOINT || !ASTRA_DB_APPLICATION_TOKEN) {
+    throw new Error("Missing required AstraDB env variables");
+}
+
+const hf = new HfInference(HUGGINGFACE_API_KEY);
+const client = new DataAPIClient(ASTRA_DB_APPLICATION_TOKEN);
+const db = client.db(ASTRA_DB_API_ENDPOINT, {
     namespace: ASTRA_DB_NAMESPACE
 });
 
-// --- TYPE DEFINITIONS ---
-interface ChatMessage {
-    role: 'system' | 'user' | 'assistant'; // ⚠️ Added 'system' role
-    content: string;
+// Updated to use a proper text generation model
+const LLM_MODEL = "HuggingFaceTB/SmolLM2-1.7B-Instruct";
+const EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5";
+
+interface ErrorResponse {
+    error: string;
+    details?: string;
 }
 
-interface AstraDocument {
-    text?: string;
-    content?: string;
-    $similarity?: number;
+function formatUTCDateTime(): string {
+    const now = new Date();
+    return now.toISOString()
+        .replace('T', ' ')
+        .slice(0, 19);
 }
-
-// --- HELPER FUNCTIONS ---
-// (ensureFlatNumberArray, generateEmbedding, and searchRelevantDocuments remain the same)
 
 function ensureFlatNumberArray(input: any): number[] {
-    if (!input) throw new Error('No embedding received');
-    if (Array.isArray(input) && !Array.isArray(input[0])) return input as number[];
-    if (Array.isArray(input) && Array.isArray(input[0])) return input[0] as number[];
-    if (input.data && Array.isArray(input.data)) return input.data as number[];
+    if (!input) {
+        throw new Error('No embedding received');
+    }
+
+    if (Array.isArray(input) && !Array.isArray(input[0])) {
+        return input as number[];
+    }
+
+    if (Array.isArray(input) && Array.isArray(input[0])) {
+        return input[0] as number[];
+    }
+
+    if (input.data && Array.isArray(input.data)) {
+        return input.data as number[];
+    }
+
     throw new Error('Invalid embedding format received');
 }
 
-async function generateEmbedding(query: string): Promise<number[]> {
-    // Note: The new InferenceClient doesn't have a separate `featureExtraction` method.
-    // We can use the base `hf.request` or keep using the old client just for this.
-    // For simplicity, let's use the old client for this one task.
-    const hfLegacy = new (await import('@huggingface/inference')).HfInference(HUGGINGFACE_API_KEY);
-    const rawEmbedding = await hfLegacy.featureExtraction({
-        model: EMBEDDING_MODEL,
-        inputs: `Represent this question for retrieval: ${query}`,
-    });
-    
-    const embedding = ensureFlatNumberArray(rawEmbedding);
-    if (embedding.length !== EMBEDDING_DIMENSION) {
-        throw new Error(`Invalid embedding dimension: Expected ${EMBEDDING_DIMENSION}, got ${embedding.length}`);
-    }
-    return embedding;
-}
-
-async function searchRelevantDocuments(embedding: number[]): Promise<string> {
-    const collection = await db.collection(ASTRA_DB_COLLECTION);
-    const cursor = await collection.find(
-        {}, 
-        { sort: { $vector: embedding }, limit: 3, includeSimilarity: true }
-    );
-    const results = await cursor.toArray() as AstraDocument[];
-
-    const relevantDocs = results
-        .filter(doc => doc.$similarity && doc.$similarity > SIMILARITY_THRESHOLD)
-        .map(doc => (doc.text || doc.content || "").slice(0, 250))
-        .join('\n\n');
-
-    console.log(`Found ${relevantDocs.length > 0 ? 'relevant' : 'no relevant'} documents.`);
-    return relevantDocs.length > 0 ? relevantDocs.slice(0, MAX_CONTEXT_LENGTH) : "No relevant documents found.";
-}
-
-
-// ⚠️ DELETED the complex `constructPrompt` function. It's no longer needed!
-
-
-/**
- * ⚠️ REWRITTEN to use chatCompletionStream
- * Streams the LLM response back to the client.
- * @param writer The WritableStreamDefaultWriter to write chunks to.
- * @param messages The full chat history, including the new system prompt.
- * @param user The user identifier.
- */
-async function streamLLMResponse(writer: WritableStreamDefaultWriter<Uint8Array>, messages: ChatMessage[], user: string) {
-    const encoder = new TextEncoder();
-    const sendData = (data: object) => writer.write(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
-    const sendEvent = (event: string, data: object) => writer.write(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
-
-    const keepAlive = setInterval(() => {
-        sendEvent('ping', { type: 'heartbeat', timestamp: Date.now() });
-    }, KEEPALIVE_INTERVAL_MS);
-
+export async function POST(req: Request) {
+    const currentDateTime = formatUTCDateTime();
     try {
-        sendData({ role: 'assistant', content: '', id: Date.now().toString(), user });
-        sendEvent('ping', { type: 'init-flush', message: 'Connection established.' });
+        const body = await req.json();
+        console.log(`[${currentDateTime}] Request body:`, body);
+        const { messages, user = 'iceheadcoder' } = body;
+        if (!messages || !Array.isArray(messages)) {
+            throw new Error("Invalid request: 'messages' must be an array");
+        }
 
-        let accumulatedContent = '';
-        
-        // ⚠️ CHANGED to `chatCompletionStream`
-        const responseStream = hf.chatCompletionStream({
-            model: LLM_MODEL,
-            messages: messages, // Pass the structured messages array directly
-            max_tokens: MAX_NEW_TOKENS,
-            temperature: 0.5,
-            top_p: 0.9,
-        });
+        const latestMessage = messages[messages.length - 1]?.content;
+        if (!latestMessage) throw new Error("No user message found");
 
-        // ⚠️ CHANGED how we process chunks to match the new format
-        for await (const chunk of responseStream) {
-            const newContent = chunk.choices[0]?.delta?.content || "";
-            if (newContent) {
-                accumulatedContent += newContent;
-                sendData({ role: 'assistant', content: accumulatedContent, id: Date.now().toString(), user });
+        let relevantDocuments: Array<{
+            content: string;
+            similarity: number;
+            index: number;
+        }> = [];
+
+        try {
+            console.log(`[${currentDateTime}] Processing query for user ${user}: ${latestMessage}`);
+            const rawEmbedding = await hf.featureExtraction({
+                model: EMBEDDING_MODEL,
+                inputs: `Represent this question for retrieval: ${latestMessage}`,
+            });
+            console.log(`[${currentDateTime}] Raw embedding:`, rawEmbedding);
+
+            const embedding = ensureFlatNumberArray(rawEmbedding);
+            if (embedding.length !== 1024) {
+                throw new Error(`Invalid embedding dimension: ${embedding.length}`);
             }
+            console.log(`[${currentDateTime}] Generated embedding vector of length: ${embedding.length}`);
+
+            const collection = await db.collection(ASTRA_DB_COLLECTION);
+            const cursor = await collection.find(
+                {} as any,
+                {
+                    sort: { $vector: embedding },
+                    limit: 3,
+                    includeSimilarity: true
+                }
+            );
+            const results = await cursor.toArray();
+            console.log(`[${currentDateTime}] AstraDB results:`, results);
+
+            relevantDocuments = results
+                .filter(doc => doc.$similarity && doc.$similarity > 0.5)
+                .map((doc, index) => ({
+                    content: (doc.text || doc.content || "").slice(0,250),
+                    similarity: doc.$similarity || 0,
+                    index: index + 1
+                }));
+
+            console.log(`[${currentDateTime}] Found ${relevantDocuments.length} relevant documents`);
+        } catch (error) {
+            console.error(`[${currentDateTime}] Search error for user ${user}:`, JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
+            relevantDocuments = [];
         }
-    } catch (error) {
-        console.error(`[Streaming Error] User: ${user}`, error);
-        sendData({ role: 'assistant', content: "Sorry, there was an error processing your request.", id: Date.now().toString(), user, error: true });
-    } finally {
-        clearInterval(keepAlive);
-        writer.write(encoder.encode('data: [DONE]\n\n'));
-        writer.close();
-    }
-}
 
+        const formattedContext = relevantDocuments.length > 0
+            ? relevantDocuments.map(doc => doc.content).join('\n\n').slice(0,1000)
+            : "No relevant documents found.";
 
-// --- API ENDPOINT ---
-export async function POST(req: NextRequest) {
-    try {
-        const { messages, user = 'anonymous' } = await req.json();
+        const encoder = new TextEncoder();
+        const stream = new TransformStream();
+        const writer = stream.writable.getWriter();
 
-        if (!Array.isArray(messages) || messages.length === 0) {
-            return new Response(JSON.stringify({ error: "Invalid request: 'messages' must be a non-empty array" }), { status: 400 });
-        }
+        (async () => {
 
-        const latestUserMessage = messages[messages.length - 1]?.content;
-        if (!latestUserMessage) {
-            return new Response(JSON.stringify({ error: "No user message found" }), { status: 400 });
-        }
+            const keepAlive = setInterval(() => {
+                writer.write(encoder.encode(`event: ping\ndata: heartbeat\n\n`));
+            }, 15000); 
 
-        console.log(`[Request Start] User: ${user}, Query: "${latestUserMessage}"`);
+            try {
+                const initialMessage = {
+                    id: Date.now().toString(),
+                    role: 'assistant' as const,
+                    content: '',
+                    createdAt: new Date(),
+                    timestamp: currentDateTime,
+                    user: user
+                };
+                await writer.write(encoder.encode(`data: ${JSON.stringify(initialMessage)}\n\n`));
+                await writer.write(encoder.encode(`event: ping\ndata: init-flush\n\n`));
 
-        const embedding = await generateEmbedding(latestUserMessage);
-        const context = await searchRelevantDocuments(embedding);
+                let accumulatedContent = '';
 
-        const prunedMessages = messages.slice(-MAX_HISTORY_MESSAGES);
-        
-        // ⚠️ NEW: Create the system prompt and add it to the messages array
-        const systemPrompt: ChatMessage = {
-            role: 'system',
-            content: `You are F1GPT, a Formula 1 expert assistant. Current date: ${new Date().toISOString()} UTC.
+                const prunedMessages = messages.slice(-10);
+                const latestMessage = prunedMessages[prunedMessages.length - 1]?.content || '';
+                const history = prunedMessages.slice(0, -1).map(msg => {
+                    if (msg.role === 'user') return `User: ${msg.content}`;
+                    if (msg.role === 'assistant') return `Assistant: ${msg.content}`;
+                    return '';
+                }).filter(Boolean).join('\n');
+
+                const maxTokens = 500;
+                
+                // Updated system prompt for the new model format
+                const systemPrompt = `<|im_start|>system
+You are F1GPT, a Formula 1 expert assistant. Current date: ${currentDateTime} UTC.
 CRITICAL RULES:
 - Give Responses in SMALL PARAGRAPHS.
 - Use the context provided below as the primary source of information.
-- Provide concise, factual answers under ${MAX_NEW_TOKENS} tokens.
-- Do not speculate. Provide only factual answers and DO NOT include disclaimers.
+- If the context does not include the answer, you may provide information about events that occurred in 2025 up to the current date (${currentDateTime}) if known.
+- Provide concise, factual answers under ${maxTokens} tokens.
+- Do not speculate or provide information about events not covered in the context or after the current date.
+- Provide only factual answers and DO NOT include any disclaimers in your output.
+- Add emojis only when required, do not add it always.
 
 Context:
-${context}`
-        };
+${formattedContext}
 
-        const messagesForLLM = [systemPrompt, ...prunedMessages];
+Conversation so far:
+${history}
+<|im_end|>
+<|im_start|>user
+${latestMessage}
+<|im_end|>
+<|im_start|>assistant`;
 
-        console.log(`[Messages Prepared] Sending ${messagesForLLM.length} messages to the LLM.`);
+                console.log(`[${currentDateTime}] System prompt:`, systemPrompt);
 
-        // 4. Stream the response
-        const stream = new TransformStream();
-        const writer = stream.writable.getWriter();
-        
-        // ⚠️ CHANGED: Pass the messages array instead of the raw prompt string
-        streamLLMResponse(writer, messagesForLLM, user).catch(err => {
-            console.error("[Stream Pipeline Error]", err);
-            writer.close();
+                const response = await hf.textGenerationStream({
+                    model: LLM_MODEL,
+                    inputs: systemPrompt,
+                    parameters: {
+                        max_new_tokens: 500,
+                        temperature: 0.5,
+                        top_p: 0.9,
+                        repetition_penalty: 1.0,
+                        stop: ["<|im_end|>", "</s>"]
+                    }
+                });
+
+                for await (const chunk of response) {
+                    if (chunk.token.text) {
+                        accumulatedContent += chunk.token.text;
+                        // Clean up any unwanted tokens
+                        accumulatedContent = accumulatedContent
+                            .replace(/<\/s>/g, '')
+                            .replace(/<\|im_end\|>/g, '')
+                            .replace(/<\|im_start\|>/g, '');
+                        
+                        const data = {
+                            id: Date.now().toString(),
+                            role: 'assistant' as const,
+                            content: accumulatedContent.trim(),
+                            createdAt: new Date(),
+                            timestamp: currentDateTime,
+                            user: user
+                        };
+                        await writer.write(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+                    }
+                }
+
+                clearInterval(keepAlive);
+                await writer.write(encoder.encode(`data: [DONE]\n\n`));
+            } catch (error) {
+                console.error(`[${currentDateTime}] Streaming error for user ${user}:`, JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
+                const errorMessage = {
+                    id: Date.now().toString(),
+                    role: 'assistant' as const,
+                    content: "Sorry, there was an error processing your request",
+                    createdAt: new Date(),
+                    timestamp: currentDateTime,
+                    user: user
+                };
+                await writer.write(encoder.encode(`data: ${JSON.stringify(errorMessage)}\n\n`));
+            } finally {
+                await writer.close();
+            }
+        })().catch(async (error: unknown) => {
+            console.error(`[${currentDateTime}] Stream error for user ${user}:`, JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
+            const errorMessage = {
+                id: Date.now().toString(),
+                role: 'assistant' as const,
+                content: "Sorry, there was an error processing your request.",
+                createdAt: new Date(),
+                timestamp: currentDateTime,
+                user: user
+            };
+            await writer.write(encoder.encode(`data: ${JSON.stringify(errorMessage)}\n\n`));
+            await writer.close();
         });
 
         return new Response(stream.readable, {
@@ -200,13 +248,16 @@ ${context}`
                 'Content-Type': 'text/event-stream',
                 'Cache-Control': 'no-cache, no-transform',
                 'Connection': 'keep-alive',
-                'X-Accel-Buffering': 'no',
+                'X-Accel-Buffering': 'no'
             },
         });
-
-    } catch (error: any) {
-        console.error("[API Error]", JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
-        return new Response(JSON.stringify({ error: "Internal Server Error", details: error.message }), {
+    } catch (error: unknown) {
+        console.error(`[${currentDateTime}] API Error:`, JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
+        const errorResponse: ErrorResponse = {
+            error: "Internal Server Error",
+            details: error instanceof Error ? error.message : "Unknown Error occurred"
+        };
+        return new Response(JSON.stringify(errorResponse), {
             status: 500,
             headers: { "Content-Type": "application/json" }
         });
