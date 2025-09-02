@@ -22,7 +22,7 @@ const db = client.db(ASTRA_DB_API_ENDPOINT, {
     namespace: ASTRA_DB_NAMESPACE
 });
 
-const LLM_MODEL = "deepset/roberta-base-squad2";
+const LLM_MODEL = "HuggingFaceTB/SmolLM3-3B";
 const EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5";
 
 interface ErrorResponse {
@@ -153,7 +153,10 @@ export async function POST(req: Request) {
                 }).filter(Boolean).join('\n');
 
                 const maxTokens = 500;
-                const systemPrompt = `<s>[INST]
+                
+                // ✅ NEW PROMPT FORMAT FOR SmolLM3-3B / LLAMA 3
+                const systemPrompt = `<|begin_of_text|><|start_header_id|>system<|end_header_id|>
+
 You are F1GPT, a Formula 1 expert assistant. Current date: ${currentDateTime} UTC.
 CRITICAL RULES:
 - Give Responses in SMALL PARAGRAPHS.
@@ -165,19 +168,18 @@ CRITICAL RULES:
 - Add emojis only when required, do not add it always.
 
 Context:
-${formattedContext}
+${formattedContext}<|eot_id|><|start_header_id|>user<|end_header_id|>
 
 Conversation so far:
 ${history}
 
 Now answer this:
-User: ${latestMessage}
-[/INST]`;
+${latestMessage}<|eot_id|><|start_header_id|>assistant<|end_header_id|>`;
 
                 console.log(`[${currentDateTime}] System prompt:`, systemPrompt);
 
                 const response = await hf.textGenerationStream({
-                    model: LLM_MODEL,
+                    model: "HuggingFaceTB/SmolLM3-3B", // ✅ NEW MODEL ID
                     inputs: systemPrompt,
                     parameters: {
                         max_new_tokens: 500,
@@ -190,7 +192,7 @@ User: ${latestMessage}
                 for await (const chunk of response) {
                     if (chunk.token.text) {
                         accumulatedContent += chunk.token.text;
-                        accumulatedContent = accumulatedContent.replace(/<\/s>/g, '');
+                        accumulatedContent = accumulatedContent.replace(/<\|eot_id\|>/g, '').replace(/<\|end_of_text\|>/g, '');
                         const data = {
                             id: Date.now().toString(),
                             role: 'assistant' as const,
@@ -216,6 +218,7 @@ User: ${latestMessage}
                 };
                 await writer.write(encoder.encode(`data: ${JSON.stringify(errorMessage)}\n\n`));
             } finally {
+                clearInterval(keepAlive); // Clear the interval
                 await writer.close();
             }
         })().catch(async (error: unknown) => {
