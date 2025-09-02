@@ -22,8 +22,8 @@ const db = client.db(ASTRA_DB_API_ENDPOINT, {
     namespace: ASTRA_DB_NAMESPACE
 });
 
-// Updated to use a proper text generation model
-const LLM_MODEL = "HuggingFaceTB/SmolLM2-1.7B-Instruct";
+// Updated to use a reliable text generation model
+const LLM_MODEL = "microsoft/DialoGPT-medium";
 const EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5";
 
 interface ErrorResponse {
@@ -155,9 +155,9 @@ export async function POST(req: Request) {
 
                 const maxTokens = 500;
                 
-                // Updated system prompt for the new model format
-                const systemPrompt = `<|im_start|>system
-You are F1GPT, a Formula 1 expert assistant. Current date: ${currentDateTime} UTC.
+                // Updated system prompt for DialoGPT format
+                const systemPrompt = `You are F1GPT, a Formula 1 expert assistant. Current date: ${currentDateTime} UTC.
+
 CRITICAL RULES:
 - Give Responses in SMALL PARAGRAPHS.
 - Use the context provided below as the primary source of information.
@@ -172,11 +172,9 @@ ${formattedContext}
 
 Conversation so far:
 ${history}
-<|im_end|>
-<|im_start|>user
-${latestMessage}
-<|im_end|>
-<|im_start|>assistant`;
+
+User: ${latestMessage}
+Assistant:`;
 
                 console.log(`[${currentDateTime}] System prompt:`, systemPrompt);
 
@@ -185,21 +183,17 @@ ${latestMessage}
                     inputs: systemPrompt,
                     parameters: {
                         max_new_tokens: 500,
-                        temperature: 0.5,
+                        temperature: 0.7,
                         top_p: 0.9,
-                        repetition_penalty: 1.0,
-                        stop_sequences: ["<|im_end|>", "</s>"]
+                        repetition_penalty: 1.1
                     }
                 });
 
                 for await (const chunk of response) {
                     if (chunk.token.text) {
                         accumulatedContent += chunk.token.text;
-                        // Clean up any unwanted tokens
-                        accumulatedContent = accumulatedContent
-                            .replace(/<\/s>/g, '')
-                            .replace(/<\|im_end\|>/g, '')
-                            .replace(/<\|im_start\|>/g, '');
+                        // Clean up any unwanted tokens - simpler cleanup for DialoGPT
+                        accumulatedContent = accumulatedContent.replace(/<\/s>/g, '');
                         
                         const data = {
                             id: Date.now().toString(),
