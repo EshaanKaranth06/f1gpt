@@ -1,5 +1,5 @@
 export const runtime = "nodejs";
-import { HfInference } from '@huggingface/inference';
+import { InferenceClient } from '@huggingface/inference';
 import { DataAPIClient } from "@datastax/astra-db-ts";
 
 const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY || '';
@@ -16,13 +16,14 @@ if (!ASTRA_DB_NAMESPACE || !ASTRA_DB_API_ENDPOINT || !ASTRA_DB_APPLICATION_TOKEN
     throw new Error("Missing required AstraDB env variables");
 }
 
-const hf = new HfInference(HUGGINGFACE_API_KEY);
+const hf = new InferenceClient(HUGGINGFACE_API_KEY);
 const client = new DataAPIClient(ASTRA_DB_APPLICATION_TOKEN);
 const db = client.db(ASTRA_DB_API_ENDPOINT, {
     namespace: ASTRA_DB_NAMESPACE
 });
 
-const LLM_MODEL = "mistralai/Mixtral-8x7B-Instruct-v0.1";
+// Using Together provider with a reliable model
+const LLM_MODEL = "openai/gpt-oss-120b";
 const EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5";
 
 interface ErrorResponse {
@@ -128,7 +129,7 @@ export async function POST(req: Request) {
 
             const keepAlive = setInterval(() => {
                 writer.write(encoder.encode(`event: ping\ndata: heartbeat\n\n`));
-            }, 15000); 
+            }, 30000); // Increased interval to reduce overhead 
 
             try {
                 const initialMessage = {
@@ -140,21 +141,21 @@ export async function POST(req: Request) {
                     user: user
                 };
                 await writer.write(encoder.encode(`data: ${JSON.stringify(initialMessage)}\n\n`));
-                await writer.write(encoder.encode(`event: ping\ndata: init-flush\n\n`));
+                // Remove the problematic init-flush event that's causing parsing errors
 
                 let accumulatedContent = '';
 
                 const prunedMessages = messages.slice(-10);
                 const latestMessage = prunedMessages[prunedMessages.length - 1]?.content || '';
-                const history = prunedMessages.slice(0, -1).map(msg => {
-                    if (msg.role === 'user') return `User: ${msg.content}`;
-                    if (msg.role === 'assistant') return `Assistant: ${msg.content}`;
-                    return '';
-                }).filter(Boolean).join('\n');
+                const conversationHistory = prunedMessages.slice(0, -1);
 
                 const maxTokens = 500;
-                const systemPrompt = `<s>[INST]
-You are F1GPT, a Formula 1 expert assistant. Current date: ${currentDateTime} UTC.
+                
+                // Build messages array for chat completion
+                const chatMessages = [
+                    {
+                        role: "system" as const,
+                        content: `You are F1GPT, a Formula 1 expert assistant. Current date: ${currentDateTime} UTC.
 CRITICAL RULES:
 - Give Responses in SMALL PARAGRAPHS.
 - Use the context provided below as the primary source of information.
@@ -165,44 +166,46 @@ CRITICAL RULES:
 - Add emojis only when required, do not add it always.
 
 Context:
-${formattedContext}
-
-Conversation so far:
-${history}
-
-Now answer this:
-User: ${latestMessage}
-[/INST]`;
-
-                console.log(`[${currentDateTime}] System prompt:`, systemPrompt);
-
-                const response = await hf.textGenerationStream({
-                    model: LLM_MODEL,
-                    inputs: systemPrompt,
-                    parameters: {
-                        max_new_tokens: 500,
-                        temperature: 0.5,
-                        top_p: 0.9,
-                        repetition_penalty: 1.0
+${formattedContext}`
+                    },
+                    ...conversationHistory,
+                    {
+                        role: "user" as const,
+                        content: latestMessage
                     }
+                ];
+
+                console.log(`[${currentDateTime}] Chat messages:`, chatMessages);
+
+                const stream = hf.chatCompletionStream({
+                    provider: "together",
+                    model: LLM_MODEL,
+                    messages: chatMessages,
+                    max_tokens: 500,
+                    temperature: 0.7,
+                    top_p: 0.9,
                 });
 
-                for await (const chunk of response) {
-                    if (chunk.token.text) {
-                        accumulatedContent += chunk.token.text;
-                        accumulatedContent = accumulatedContent.replace(/<\/s>/g, '');
-                        const data = {
-                            id: Date.now().toString(),
-                            role: 'assistant' as const,
-                            content: accumulatedContent.trim(),
-                            createdAt: new Date(),
-                            timestamp: currentDateTime,
-                            user: user
-                        };
-                        await writer.write(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+                for await (const chunk of stream) {
+                    if (chunk.choices && chunk.choices.length > 0) {
+                        const newContent = chunk.choices[0].delta?.content;
+                        if (newContent) {
+                            accumulatedContent += newContent;
+                            
+                            const data = {
+                                id: Date.now().toString(),
+                                role: 'assistant' as const,
+                                content: accumulatedContent.trim(),
+                                createdAt: new Date(),
+                                timestamp: currentDateTime,
+                                user: user
+                            };
+                            await writer.write(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+                        }
                     }
                 }
 
+                clearInterval(keepAlive);
                 await writer.write(encoder.encode(`data: [DONE]\n\n`));
             } catch (error) {
                 console.error(`[${currentDateTime}] Streaming error for user ${user}:`, JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
