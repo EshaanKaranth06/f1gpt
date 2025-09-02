@@ -1,6 +1,6 @@
 // @/app/api/chat/route.ts
 
-import { HfInference } from '@huggingface/inference';
+import { InferenceClient } from "@huggingface/inference"; // ⚠️ CHANGED from HfInference
 import { DataAPIClient } from "@datastax/astra-db-ts";
 import { NextRequest } from 'next/server';
 
@@ -29,14 +29,15 @@ if (!HUGGINGFACE_API_KEY || !ASTRA_DB_NAMESPACE || !ASTRA_DB_API_ENDPOINT || !AS
     throw new Error("Missing required environment variables for Hugging Face or AstraDB.");
 }
 
-const hf = new HfInference(HUGGINGFACE_API_KEY);
+// ⚠️ CHANGED to the newer InferenceClient
+const hf = new InferenceClient(HUGGINGFACE_API_KEY);
 const db = new DataAPIClient(ASTRA_DB_APPLICATION_TOKEN).db(ASTRA_DB_API_ENDPOINT, {
     namespace: ASTRA_DB_NAMESPACE
 });
 
 // --- TYPE DEFINITIONS ---
 interface ChatMessage {
-    role: 'user' | 'assistant';
+    role: 'system' | 'user' | 'assistant'; // ⚠️ Added 'system' role
     content: string;
 }
 
@@ -47,12 +48,8 @@ interface AstraDocument {
 }
 
 // --- HELPER FUNCTIONS ---
+// (ensureFlatNumberArray, generateEmbedding, and searchRelevantDocuments remain the same)
 
-/**
- * Ensures the embedding is a flat array of numbers.
- * @param input The raw embedding output from the model.
- * @returns A flat array of numbers.
- */
 function ensureFlatNumberArray(input: any): number[] {
     if (!input) throw new Error('No embedding received');
     if (Array.isArray(input) && !Array.isArray(input[0])) return input as number[];
@@ -61,13 +58,12 @@ function ensureFlatNumberArray(input: any): number[] {
     throw new Error('Invalid embedding format received');
 }
 
-/**
- * Generates a vector embedding for a given text query.
- * @param query The user's message content.
- * @returns A promise that resolves to the embedding vector.
- */
 async function generateEmbedding(query: string): Promise<number[]> {
-    const rawEmbedding = await hf.featureExtraction({
+    // Note: The new InferenceClient doesn't have a separate `featureExtraction` method.
+    // We can use the base `hf.request` or keep using the old client just for this.
+    // For simplicity, let's use the old client for this one task.
+    const hfLegacy = new (await import('@huggingface/inference')).HfInference(HUGGINGFACE_API_KEY);
+    const rawEmbedding = await hfLegacy.featureExtraction({
         model: EMBEDDING_MODEL,
         inputs: `Represent this question for retrieval: ${query}`,
     });
@@ -79,20 +75,11 @@ async function generateEmbedding(query: string): Promise<number[]> {
     return embedding;
 }
 
-/**
- * Searches for relevant documents in AstraDB based on the query embedding.
- * @param embedding The vector embedding of the user's query.
- * @returns A formatted string of context from relevant documents.
- */
 async function searchRelevantDocuments(embedding: number[]): Promise<string> {
     const collection = await db.collection(ASTRA_DB_COLLECTION);
     const cursor = await collection.find(
         {}, 
-        {
-            sort: { $vector: embedding },
-            limit: 3,
-            includeSimilarity: true
-        }
+        { sort: { $vector: embedding }, limit: 3, includeSimilarity: true }
     );
     const results = await cursor.toArray() as AstraDocument[];
 
@@ -105,48 +92,18 @@ async function searchRelevantDocuments(embedding: number[]): Promise<string> {
     return relevantDocs.length > 0 ? relevantDocs.slice(0, MAX_CONTEXT_LENGTH) : "No relevant documents found.";
 }
 
-/**
- * Constructs the prompt for the language model, including context, history, and rules.
- * @param messages The chat history.
- * @param context The context retrieved from the vector database.
- * @returns The fully formatted prompt string.
- */
-function constructPrompt(messages: ChatMessage[], context: string): string {
-    const latestUserMessage = messages[messages.length - 1]?.content || '';
-    const history = messages.slice(0, -1)
-        .map(msg => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`)
-        .join('\n');
-    const currentDateTime = new Date().toISOString();
 
-    return `<|begin_of_text|><|start_header_id|>system<|end_header_id|>
-
-You are F1GPT, a Formula 1 expert assistant. Current date: ${currentDateTime} UTC.
-CRITICAL RULES:
-- Give Responses in SMALL PARAGRAPHS.
-- Use the context provided below as the primary source of information.
-- If the context does not include the answer, you may provide information about events that occurred in 2025 up to the current date.
-- Provide concise, factual answers under ${MAX_NEW_TOKENS} tokens.
-- Do not speculate or provide information about events not covered in the context or after the current date.
-- Provide only factual answers and DO NOT include any disclaimers in your output.
-
-Context:
-${context}<|eot_id|><|start_header_id|>user<|end_header_id|>
-
-Conversation so far:
-${history}
-
-Now answer this:
-${latestUserMessage}<|eot_id|><|start_header_id|>assistant<|end_header_id|>`;
-}
+// ⚠️ DELETED the complex `constructPrompt` function. It's no longer needed!
 
 
 /**
+ * ⚠️ REWRITTEN to use chatCompletionStream
  * Streams the LLM response back to the client.
  * @param writer The WritableStreamDefaultWriter to write chunks to.
- * @param prompt The prompt to send to the LLM.
+ * @param messages The full chat history, including the new system prompt.
  * @param user The user identifier.
  */
-async function streamLLMResponse(writer: WritableStreamDefaultWriter<Uint8Array>, prompt: string, user: string) {
+async function streamLLMResponse(writer: WritableStreamDefaultWriter<Uint8Array>, messages: ChatMessage[], user: string) {
     const encoder = new TextEncoder();
     const sendData = (data: object) => writer.write(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
     const sendEvent = (event: string, data: object) => writer.write(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
@@ -156,24 +113,26 @@ async function streamLLMResponse(writer: WritableStreamDefaultWriter<Uint8Array>
     }, KEEPALIVE_INTERVAL_MS);
 
     try {
-        // Send an initial empty message to establish the connection
         sendData({ role: 'assistant', content: '', id: Date.now().toString(), user });
-        
-        // **FIX**: Send a JSON object for the flush event
         sendEvent('ping', { type: 'init-flush', message: 'Connection established.' });
 
         let accumulatedContent = '';
-        const responseStream = await hf.textGenerationStream({
+        
+        // ⚠️ CHANGED to `chatCompletionStream`
+        const responseStream = hf.chatCompletionStream({
             model: LLM_MODEL,
-            inputs: prompt,
-            parameters: { max_new_tokens: MAX_NEW_TOKENS, temperature: 0.5, top_p: 0.9, repetition_penalty: 1.0 }
+            messages: messages, // Pass the structured messages array directly
+            max_tokens: MAX_NEW_TOKENS,
+            temperature: 0.5,
+            top_p: 0.9,
         });
 
+        // ⚠️ CHANGED how we process chunks to match the new format
         for await (const chunk of responseStream) {
-            if (chunk.token.text) {
-                accumulatedContent += chunk.token.text;
-                accumulatedContent = accumulatedContent.replace(/<\|eot_id\|>|<\|end_of_text\|>/g, '');
-                sendData({ role: 'assistant', content: accumulatedContent.trimStart(), id: Date.now().toString(), user });
+            const newContent = chunk.choices[0]?.delta?.content || "";
+            if (newContent) {
+                accumulatedContent += newContent;
+                sendData({ role: 'assistant', content: accumulatedContent, id: Date.now().toString(), user });
             }
         }
     } catch (error) {
@@ -203,21 +162,35 @@ export async function POST(req: NextRequest) {
 
         console.log(`[Request Start] User: ${user}, Query: "${latestUserMessage}"`);
 
-        // 1. Generate embedding for the latest message
         const embedding = await generateEmbedding(latestUserMessage);
-
-        // 2. Retrieve context from AstraDB
         const context = await searchRelevantDocuments(embedding);
 
-        // 3. Construct the full prompt
         const prunedMessages = messages.slice(-MAX_HISTORY_MESSAGES);
-        const prompt = constructPrompt(prunedMessages, context);
-        console.log(`[Prompt Generated] Prompt length: ${prompt.length}`);
+        
+        // ⚠️ NEW: Create the system prompt and add it to the messages array
+        const systemPrompt: ChatMessage = {
+            role: 'system',
+            content: `You are F1GPT, a Formula 1 expert assistant. Current date: ${new Date().toISOString()} UTC.
+CRITICAL RULES:
+- Give Responses in SMALL PARAGRAPHS.
+- Use the context provided below as the primary source of information.
+- Provide concise, factual answers under ${MAX_NEW_TOKENS} tokens.
+- Do not speculate. Provide only factual answers and DO NOT include disclaimers.
+
+Context:
+${context}`
+        };
+
+        const messagesForLLM = [systemPrompt, ...prunedMessages];
+
+        console.log(`[Messages Prepared] Sending ${messagesForLLM.length} messages to the LLM.`);
 
         // 4. Stream the response
         const stream = new TransformStream();
         const writer = stream.writable.getWriter();
-        streamLLMResponse(writer, prompt, user).catch(err => {
+        
+        // ⚠️ CHANGED: Pass the messages array instead of the raw prompt string
+        streamLLMResponse(writer, messagesForLLM, user).catch(err => {
             console.error("[Stream Pipeline Error]", err);
             writer.close();
         });
