@@ -188,7 +188,7 @@ ${latestMessage}
                         temperature: 0.5,
                         top_p: 0.9,
                         repetition_penalty: 1.0,
-                        stop: ["<|im_end|>", "</s>"]
+                        stop_sequences: ["<|im_end|>", "</s>"]
                     }
                 });
 
