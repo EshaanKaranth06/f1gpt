@@ -17,15 +17,14 @@ if (!ASTRA_DB_NAMESPACE || !ASTRA_DB_API_ENDPOINT || !ASTRA_DB_APPLICATION_TOKEN
     throw new Error("Missing required AstraDB env variables");
 }
 
-// Initialize the new InferenceClient
+
 const hfClient = new InferenceClient(HUGGINGFACE_API_KEY);
 const client = new DataAPIClient(ASTRA_DB_APPLICATION_TOKEN);
 const db = client.db(ASTRA_DB_API_ENDPOINT, {
     namespace: ASTRA_DB_NAMESPACE
 });
 
-// The model can be swapped, but we'll keep the one you had.
-// Note: Not all models support the chatCompletionStream. Mixtral-8x7B-Instruct does.
+
 const LLM_MODEL = "mistralai/Mixtral-8x7B-Instruct-v0.1";
 const EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5";
 
@@ -78,7 +77,7 @@ export async function POST(req: Request) {
 
         try {
             console.log(`[${currentDateTime}] Processing query for user ${user}: ${latestMessage}`);
-            // The featureExtraction call remains the same with the new client
+            
             const rawEmbedding = await hfClient.featureExtraction({
                 model: EMBEDDING_MODEL,
                 inputs: `Represent this question for retrieval: ${latestMessage}`,
@@ -145,9 +144,7 @@ export async function POST(req: Request) {
                 let accumulatedContent = '';
                 const maxTokens = 500;
                 
-                // --- MODIFICATION START ---
                 
-                // 1. Prepare messages for the chat completion API
                 const systemPrompt = `You are F1GPT, a Formula 1 expert assistant. Current date: ${currentDateTime} UTC.
 CRITICAL RULES:
 - Give Responses in SMALL PARAGRAPHS.
@@ -165,7 +162,7 @@ ${formattedContext}`;
                 
                 const messagesForApi = [
                     { role: "system", content: systemPrompt },
-                    // Map the existing message history to the required format
+                    
                     ...prunedMessages.map(msg => ({
                         role: msg.role,
                         content: msg.content
@@ -174,17 +171,17 @@ ${formattedContext}`;
 
                 console.log(`[${currentDateTime}] API Messages:`, JSON.stringify(messagesForApi, null, 2));
 
-                // 2. Call chatCompletionStream instead of textGenerationStream
+                
                 const responseStream = hfClient.chatCompletionStream({
                     model: LLM_MODEL,
                     messages: messagesForApi,
                     max_tokens: maxTokens, // Note: parameter is max_tokens
-                    temperature: 0.5,
+                    temperature: 0.3,
                     top_p: 0.9,
-                    repetition_penalty: 1.0
+                    repetition_penalty: 1.1
                 });
 
-                // 3. Process the new stream chunk format
+                
                 for await (const chunk of responseStream) {
                     const newContent = chunk.choices?.[0]?.delta?.content || '';
                     if (newContent) {
@@ -202,7 +199,7 @@ ${formattedContext}`;
                     }
                 }
                 
-                // --- MODIFICATION END ---
+                
 
                 await writer.write(encoder.encode(`data: [DONE]\n\n`));
             } catch (error) {
