@@ -1,5 +1,5 @@
 export const runtime = "nodejs";
-import { featureExtraction, textGeneration } from "@huggingface/inference";
+import { InferenceClient, featureExtraction } from "@huggingface/inference";
 import { DataAPIClient } from "@datastax/astra-db-ts";
 
 const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY || "";
@@ -16,13 +16,13 @@ if (!ASTRA_DB_NAMESPACE || !ASTRA_DB_API_ENDPOINT || !ASTRA_DB_APPLICATION_TOKEN
   throw new Error("Missing required AstraDB env variables");
 }
 
-const client = new DataAPIClient(ASTRA_DB_APPLICATION_TOKEN);
-const db = client.db(ASTRA_DB_API_ENDPOINT, {
+const client = new InferenceClient(HUGGINGFACE_API_KEY);
+const dbClient = new DataAPIClient(ASTRA_DB_APPLICATION_TOKEN);
+const db = dbClient.db(ASTRA_DB_API_ENDPOINT, {
   namespace: ASTRA_DB_NAMESPACE,
 });
 
-// Using a much faster, smaller model to avoid timeouts
-const LLM_MODEL = "openai/gpt-oss-120b";
+const LLM_MODEL = "meta-llama/Llama-3.2-3B-Instruct";
 const EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5";
 
 interface ErrorResponse {
@@ -71,12 +71,12 @@ export async function POST(req: Request) {
     };
     await writer.write(encoder.encode(`data: ${JSON.stringify(initialMessage)}\n\n`));
 
-    // Start async processing with aggressive timeouts
+    // Start async processing
     (async () => {
       let relevantDocuments: Array<{ content: string; similarity: number; index: number }> = [];
       
       try {
-        // Very quick embedding search
+        // Quick embedding search with timeout
         const rawEmbedding = await Promise.race([
           featureExtraction({
             accessToken: HUGGINGFACE_API_KEY,
@@ -84,7 +84,7 @@ export async function POST(req: Request) {
             inputs: `Represent this question for retrieval: ${latestMessage}`,
           }),
           new Promise((_, reject) => 
-            setTimeout(() => reject(new Error("Embedding timeout")), 2000)
+            setTimeout(() => reject(new Error("Embedding timeout")), 3000)
           ),
         ]);
 
@@ -95,7 +95,7 @@ export async function POST(req: Request) {
           {} as any,
           {
             sort: { $vector: embedding },
-            limit: 2,
+            limit: 3,
             includeSimilarity: true,
           }
         );
@@ -104,7 +104,7 @@ export async function POST(req: Request) {
         relevantDocuments = results
           .filter((doc) => doc.$similarity && doc.$similarity > 0.5)
           .map((doc, index) => ({
-            content: (doc.text || doc.content || "").slice(0, 150),
+            content: (doc.text || doc.content || "").slice(0, 200),
             similarity: doc.$similarity || 0,
             index: index + 1,
           }));
@@ -115,59 +115,78 @@ export async function POST(req: Request) {
 
       const formattedContext =
         relevantDocuments.length > 0
-          ? relevantDocuments.map((doc) => doc.content).join("\n").slice(0, 500)
+          ? relevantDocuments.map((doc) => doc.content).join("\n\n").slice(0, 800)
           : "";
 
-      // Very simple prompt for fast generation
-      const prompt = formattedContext 
-        ? `Context: ${formattedContext}\n\nQ: ${latestMessage}\nA:` 
-        : `F1 Question: ${latestMessage}\nAnswer:`;
+      const prunedMessages = messages.slice(-8);
+      const conversationHistory = prunedMessages.slice(0, -1);
+
+      // Build messages for chat completion
+      const chatMessages = [
+        {
+          role: "system" as const,
+          content: `You are F1GPT, a Formula 1 expert assistant. Current date: ${currentDateTime} UTC.
+
+CRITICAL RULES:
+- Keep responses concise and factual (under 300 tokens)
+- Use the context below as your primary source
+- Do not speculate about events beyond the current date
+- Provide only factual F1 information
+
+Context:
+${formattedContext || "No additional context available."}`,
+        },
+        ...conversationHistory,
+        { role: "user" as const, content: latestMessage },
+      ];
 
       try {
-        // Use non-streaming textGeneration for faster response
-        const response = await Promise.race([
-          textGeneration({
-            accessToken: HUGGINGFACE_API_KEY,
-            model: LLM_MODEL,
-            inputs: prompt,
-            parameters: {
-              max_new_tokens: 150,
-              temperature: 0.6,
-              top_p: 0.9,
-              repetition_penalty: 1.05,
-              return_full_text: false,
-            },
-          }),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error("Generation timeout")), 5000)
-          ),
-        ]);
+        // Use chatCompletionStream with Together provider and Llama model
+        const llmStream = client.chatCompletionStream({
+          provider: "together",
+          model: LLM_MODEL,
+          messages: chatMessages,
+          max_tokens: 400,
+          temperature: 0.7,
+          top_p: 0.9,
+        });
 
-        // Send the complete response at once
-        const finalContent = response.generated_text?.trim() || "Unable to generate response.";
-        
-        const finalData = {
-          id: Date.now().toString(),
-          role: "assistant" as const,
-          content: finalContent,
-          createdAt: new Date(),
-          timestamp: currentDateTime,
-          user: user,
-        };
-        
-        await writer.write(encoder.encode(`data: ${JSON.stringify(finalData)}\n\n`));
+        let accumulatedContent = "";
+
+        for await (const chunk of llmStream) {
+          if (chunk.choices && chunk.choices.length > 0) {
+            const newContent = chunk.choices[0].delta?.content;
+            if (newContent) {
+              accumulatedContent += newContent;
+              
+              const data = {
+                id: Date.now().toString(),
+                role: "assistant" as const,
+                content: accumulatedContent.trim(),
+                createdAt: new Date(),
+                timestamp: currentDateTime,
+                user: user,
+              };
+              
+              await writer.write(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+            }
+          }
+        }
         
       } catch (genError) {
         console.error(`[${currentDateTime}] Generation error:`, genError);
         
-        // Quick fallback with hardcoded F1 knowledge
-        let fallbackContent = "I'm having trouble accessing the model. ";
+        // Smart fallback with F1 knowledge
+        let fallbackContent = "";
         
-        // Add some basic F1 2024 knowledge
-        if (latestMessage.toLowerCase().includes("2024") && latestMessage.toLowerCase().includes("championship")) {
-          fallbackContent += "Max Verstappen won the 2024 Formula 1 Drivers' Championship with Red Bull Racing.";
+        if (latestMessage.toLowerCase().includes("2024") && 
+            latestMessage.toLowerCase().includes("championship")) {
+          fallbackContent = "Max Verstappen won the 2024 Formula 1 Drivers' Championship with Red Bull Racing, securing his fourth consecutive title.";
+        } else if (latestMessage.toLowerCase().includes("2024") && 
+                   latestMessage.toLowerCase().includes("constructors")) {
+          fallbackContent = "McLaren won the 2024 Formula 1 Constructors' Championship.";
         } else {
-          fallbackContent += "Please try your question again.";
+          fallbackContent = "I'm experiencing technical difficulties. Please try your Formula 1 question again.";
         }
         
         const fallbackData = {
@@ -188,7 +207,7 @@ export async function POST(req: Request) {
       const errorData = {
         id: Date.now().toString(),
         role: "assistant" as const,
-        content: "Sorry, there was an error processing your request.",
+        content: "Sorry, there was an error processing your request. Please try again.",
         createdAt: new Date(),
         timestamp: currentDateTime,
         user: user,
