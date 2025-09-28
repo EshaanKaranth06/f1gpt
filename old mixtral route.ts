@@ -1,7 +1,6 @@
 export const runtime = "nodejs";
-import { InferenceClient } from "@huggingface/inference";
+import { HfInference } from '@huggingface/inference';
 import { DataAPIClient } from "@datastax/astra-db-ts";
-import { Message } from "ai";
 
 const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY || '';
 const ASTRA_DB_NAMESPACE = process.env.ASTRA_DB_NAMESPACE || '';
@@ -17,15 +16,13 @@ if (!ASTRA_DB_NAMESPACE || !ASTRA_DB_API_ENDPOINT || !ASTRA_DB_APPLICATION_TOKEN
     throw new Error("Missing required AstraDB env variables");
 }
 
-
-const hfClient = new InferenceClient(HUGGINGFACE_API_KEY);
+const hf = new HfInference(HUGGINGFACE_API_KEY);
 const client = new DataAPIClient(ASTRA_DB_APPLICATION_TOKEN);
 const db = client.db(ASTRA_DB_API_ENDPOINT, {
     namespace: ASTRA_DB_NAMESPACE
 });
 
-
-const LLM_MODEL = "HuggingFaceTB/SmolLM3-3B";
+const LLM_MODEL = "mistralai/Mixtral-8x7B-Instruct-v0.1";
 const EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5";
 
 interface ErrorResponse {
@@ -44,15 +41,19 @@ function ensureFlatNumberArray(input: any): number[] {
     if (!input) {
         throw new Error('No embedding received');
     }
+
     if (Array.isArray(input) && !Array.isArray(input[0])) {
         return input as number[];
     }
+
     if (Array.isArray(input) && Array.isArray(input[0])) {
         return input[0] as number[];
     }
+
     if (input.data && Array.isArray(input.data)) {
         return input.data as number[];
     }
+
     throw new Error('Invalid embedding format received');
 }
 
@@ -77,8 +78,7 @@ export async function POST(req: Request) {
 
         try {
             console.log(`[${currentDateTime}] Processing query for user ${user}: ${latestMessage}`);
-            
-            const rawEmbedding = await hfClient.featureExtraction({
+            const rawEmbedding = await hf.featureExtraction({
                 model: EMBEDDING_MODEL,
                 inputs: `Represent this question for retrieval: ${latestMessage}`,
             });
@@ -105,7 +105,7 @@ export async function POST(req: Request) {
             relevantDocuments = results
                 .filter(doc => doc.$similarity && doc.$similarity > 0.5)
                 .map((doc, index) => ({
-                    content: (doc.text || doc.content || "").slice(0, 250),
+                    content: (doc.text || doc.content || "").slice(0,250),
                     similarity: doc.$similarity || 0,
                     index: index + 1
                 }));
@@ -117,7 +117,7 @@ export async function POST(req: Request) {
         }
 
         const formattedContext = relevantDocuments.length > 0
-            ? relevantDocuments.map(doc => doc.content).join('\n\n').slice(0, 1000)
+            ? relevantDocuments.map(doc => doc.content).join('\n\n').slice(0,1000)
             : "No relevant documents found.";
 
         const encoder = new TextEncoder();
@@ -125,9 +125,10 @@ export async function POST(req: Request) {
         const writer = stream.writable.getWriter();
 
         (async () => {
+
             const keepAlive = setInterval(() => {
                 writer.write(encoder.encode(`event: ping\ndata: heartbeat\n\n`));
-            }, 15000);
+            }, 15000); 
 
             try {
                 const initialMessage = {
@@ -142,10 +143,18 @@ export async function POST(req: Request) {
                 await writer.write(encoder.encode(`event: ping\ndata: init-flush\n\n`));
 
                 let accumulatedContent = '';
+
+                const prunedMessages = messages.slice(-10);
+                const latestMessage = prunedMessages[prunedMessages.length - 1]?.content || '';
+                const history = prunedMessages.slice(0, -1).map(msg => {
+                    if (msg.role === 'user') return `User: ${msg.content}`;
+                    if (msg.role === 'assistant') return `Assistant: ${msg.content}`;
+                    return '';
+                }).filter(Boolean).join('\n');
+
                 const maxTokens = 500;
-                
-                
-                const systemPrompt = `You are F1GPT, a Formula 1 expert assistant. Current date: ${currentDateTime} UTC.
+                const systemPrompt = `<s>[INST]
+You are F1GPT, a Formula 1 expert assistant. Current date: ${currentDateTime} UTC.
 CRITICAL RULES:
 - Give Responses in SMALL PARAGRAPHS.
 - Use the context provided below as the primary source of information.
@@ -156,36 +165,31 @@ CRITICAL RULES:
 - Add emojis only when required, do not add it always.
 
 Context:
-${formattedContext}`;
+${formattedContext}
 
-                const prunedMessages: Message[] = messages.slice(-10);
-                
-                const messagesForApi = [
-                    { role: "system", content: systemPrompt },
-                    
-                    ...prunedMessages.map(msg => ({
-                        role: msg.role,
-                        content: msg.content
-                    }))
-                ];
+Conversation so far:
+${history}
 
-                console.log(`[${currentDateTime}] API Messages:`, JSON.stringify(messagesForApi, null, 2));
+Now answer this:
+User: ${latestMessage}
+[/INST]`;
 
-                
-                const responseStream = hfClient.chatCompletionStream({
+                console.log(`[${currentDateTime}] System prompt:`, systemPrompt);
+
+                const response = await hf.textGenerationStream({
                     model: LLM_MODEL,
-                    messages: messagesForApi,
-                    max_tokens: maxTokens, // Note: parameter is max_tokens
-                    temperature: 0.3,
-                    top_p: 0.9,
-                    repetition_penalty: 1.1
+                    inputs: systemPrompt,
+                    parameters: {
+                        max_new_tokens: 500,
+                        temperature: 0.5,
+                        top_p: 0.9,
+                        repetition_penalty: 1.0
+                    }
                 });
 
-                
-                for await (const chunk of responseStream) {
-                    const newContent = chunk.choices?.[0]?.delta?.content || '';
-                    if (newContent) {
-                        accumulatedContent += newContent;
+                for await (const chunk of response) {
+                    if (chunk.token.text) {
+                        accumulatedContent += chunk.token.text;
                         accumulatedContent = accumulatedContent.replace(/<\/s>/g, '');
                         const data = {
                             id: Date.now().toString(),
@@ -198,8 +202,6 @@ ${formattedContext}`;
                         await writer.write(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
                     }
                 }
-                
-                
 
                 await writer.write(encoder.encode(`data: [DONE]\n\n`));
             } catch (error) {
@@ -214,7 +216,6 @@ ${formattedContext}`;
                 };
                 await writer.write(encoder.encode(`data: ${JSON.stringify(errorMessage)}\n\n`));
             } finally {
-                clearInterval(keepAlive);
                 await writer.close();
             }
         })().catch(async (error: unknown) => {
