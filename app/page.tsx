@@ -1,7 +1,6 @@
 "use client"
-
 import Image from "next/image";
-import img from "./assets/img.png";
+import img from "./assets/img2.png";
 import Bubble from "./components/Bubble"
 import LoadingBubble from "./components/LoadingBubble";
 import PromptSuggestionRow from "./components/PromptSuggestionRow";
