@@ -1,67 +1,78 @@
 export const runtime = "nodejs";
-import { InferenceClient } from "@huggingface/inference";
+import { GoogleGenerativeAIEmbeddings } from "@langchain/google-genai";
+import { TaskType } from "@google/generative-ai";
 import { DataAPIClient } from "@datastax/astra-db-ts";
 import { Message } from "ai";
 
-const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY || '';
-const ASTRA_DB_NAMESPACE = process.env.ASTRA_DB_NAMESPACE || '';
-const ASTRA_DB_COLLECTION = 'f1gpt';
-const ASTRA_DB_API_ENDPOINT = process.env.ASTRA_DB_API_ENDPOINT || '';
-const ASTRA_DB_APPLICATION_TOKEN = process.env.ASTRA_DB_APPLICATION_TOKEN || '';
+// ─── Env ─────────────────────────────────────────────────────────────────────
+const GEMINI_API_KEY   = process.env.GEMINI_API_KEY!;
+const GEMINI_MODEL     = "gemini-2.5-flash";
+const RERANKER_MODEL   = "gemini-2.5-flash-lite";
 
-if (!HUGGINGFACE_API_KEY) {
-    throw new Error("Missing Hugging Face API key");
+const ASTRA_DB_APPLICATION_TOKEN = process.env.ASTRA_DB_APPLICATION_TOKEN!;
+const ASTRA_DB_API_ENDPOINT = process.env.ASTRA_DB_API_ENDPOINT!;
+const ASTRA_DB_NAMESPACE = process.env.ASTRA_DB_NAMESPACE!;
+const ASTRA_COLLECTION = "f1_gpt"; 
+
+const EMBEDDING_DIM    = 1536; 
+
+if (!GEMINI_API_KEY) throw new Error("Missing GEMINI_API_KEY");
+if (!ASTRA_DB_API_ENDPOINT || !ASTRA_DB_APPLICATION_TOKEN || !ASTRA_DB_NAMESPACE) {
+    throw new Error("Missing Astra DB environment variables.");
 }
 
-if (!ASTRA_DB_NAMESPACE || !ASTRA_DB_API_ENDPOINT || !ASTRA_DB_APPLICATION_TOKEN) {
-    throw new Error("Missing required AstraDB env variables");
-}
+// ─── Clients ──────────────────────────────────────────────────────────────────
+const astraClient = new DataAPIClient(ASTRA_DB_APPLICATION_TOKEN);
+const db = astraClient.db(ASTRA_DB_API_ENDPOINT, {
+    namespace: ASTRA_DB_NAMESPACE,
+});
+const collection = db.collection(ASTRA_COLLECTION);
 
-
-const hfClient = new InferenceClient(HUGGINGFACE_API_KEY);
-const client = new DataAPIClient(ASTRA_DB_APPLICATION_TOKEN);
-const db = client.db(ASTRA_DB_API_ENDPOINT, {
-    namespace: ASTRA_DB_NAMESPACE
+const queryEmbedder = new GoogleGenerativeAIEmbeddings({
+    apiKey: GEMINI_API_KEY,
+    model: "gemini-embedding-2",
+    taskType: TaskType.RETRIEVAL_QUERY,
 });
 
+// ─── Embedding cache ──────────────────────────────────────────────────────────
+const embeddingCache = new Map<string, number[]>();
+const CACHE_MAX_SIZE  = 200;
 
-const LLM_MODEL = "HuggingFaceTB/SmolLM3-3B";
-const EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5";
+async function getEmbedding(text: string): Promise<number[]> {
+    const key = text.trim().toLowerCase();
+    if (embeddingCache.has(key)) return embeddingCache.get(key)!;
 
-interface ErrorResponse {
-    error: string;
-    details?: string;
+    let embedding = await queryEmbedder.embedQuery(text);
+
+    if (embedding && embedding.length > EMBEDDING_DIM) {
+        embedding = embedding.slice(0, EMBEDDING_DIM);
+    }
+
+    if (!embedding || embedding.length !== EMBEDDING_DIM) {
+        throw new Error(`Invalid embedding dimension: got ${embedding?.length ?? 0}`);
+    }
+
+    if (embeddingCache.size >= CACHE_MAX_SIZE) {
+        embeddingCache.delete(embeddingCache.keys().next().value!);
+    }
+    embeddingCache.set(key, embedding);
+    return embedding;
 }
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+interface ErrorResponse { error: string; details?: string; }
 
 function formatUTCDateTime(): string {
-    const now = new Date();
-    return now.toISOString()
-        .replace('T', ' ')
-        .slice(0, 19);
+    return new Date().toISOString().replace("T", " ").slice(0, 19);
 }
 
-function ensureFlatNumberArray(input: any): number[] {
-    if (!input) {
-        throw new Error('No embedding received');
-    }
-    if (Array.isArray(input) && !Array.isArray(input[0])) {
-        return input as number[];
-    }
-    if (Array.isArray(input) && Array.isArray(input[0])) {
-        return input[0] as number[];
-    }
-    if (input.data && Array.isArray(input.data)) {
-        return input.data as number[];
-    }
-    throw new Error('Invalid embedding format received');
-}
-
+// ─── Route ────────────────────────────────────────────────────────────────────
 export async function POST(req: Request) {
     const currentDateTime = formatUTCDateTime();
     try {
         const body = await req.json();
-        console.log(`[${currentDateTime}] Request body:`, body);
-        const { messages, user = 'iceheadcoder' } = body;
+        const { messages, user = "eshaan" } = body;
+        
         if (!messages || !Array.isArray(messages)) {
             throw new Error("Invalid request: 'messages' must be an array");
         }
@@ -69,185 +80,237 @@ export async function POST(req: Request) {
         const latestMessage = messages[messages.length - 1]?.content;
         if (!latestMessage) throw new Error("No user message found");
 
-        let relevantDocuments: Array<{
-            content: string;
-            similarity: number;
-            index: number;
-        }> = [];
+        // 🛡️ ENTERPRISE UPGRADE: Intent Bypassing
+        // Checks if the message is 3 words or less AND starts with a common greeting
+        const isConversational = latestMessage.trim().split(/\s+/).length <= 3 && 
+            /^(hi|hello|hey|thanks|thank you|who are you|help)\b/i.test(latestMessage.trim());
 
-        try {
-            console.log(`[${currentDateTime}] Processing query for user ${user}: ${latestMessage}`);
+        interface RawDoc { content: string; title: string; similarity: number; rerankScore?: number; }
+        
+        // Declare these outside the 'if' block so Step 3 can still see them!
+        let candidateDocs: RawDoc[] = [];
+        let relevantDocuments: RawDoc[] = [];
+
+        // Only run the heavy RAG machinery if it's NOT a simple greeting
+        if (!isConversational) {
             
-            const rawEmbedding = await hfClient.featureExtraction({
-                model: EMBEDDING_MODEL,
-                inputs: `Represent this question for retrieval: ${latestMessage}`,
-            });
-            console.log(`[${currentDateTime}] Raw embedding:`, rawEmbedding);
+            // ── Step 1: Astra DB Retrieval ───────────────────────────────────────
+            try {
+                const embedding = await getEmbedding(latestMessage);
 
-            const embedding = ensureFlatNumberArray(rawEmbedding);
-            if (embedding.length !== 1024) {
-                throw new Error(`Invalid embedding dimension: ${embedding.length}`);
-            }
-            console.log(`[${currentDateTime}] Generated embedding vector of length: ${embedding.length}`);
+                const astraResults = await collection.find(
+                    {}, 
+                    {
+                        sort: { $vector: embedding },
+                        limit: 30,
+                        includeSimilarity: true,
+                    }
+                ).toArray();
 
-            const collection = await db.collection(ASTRA_DB_COLLECTION);
-            const cursor = await collection.find(
-                {} as any,
-                {
-                    sort: { $vector: embedding },
-                    limit: 3,
-                    includeSimilarity: true
-                }
-            );
-            const results = await cursor.toArray();
-            console.log(`[${currentDateTime}] AstraDB results:`, results);
-
-            relevantDocuments = results
-                .filter(doc => doc.$similarity && doc.$similarity > 0.5)
-                .map((doc, index) => ({
-                    content: (doc.text || doc.content || "").slice(0, 250),
-                    similarity: doc.$similarity || 0,
-                    index: index + 1
+                candidateDocs = astraResults.map((hit: any) => ({
+                    content: (hit.text || hit.content || "").trim(),
+                    title: hit.title || "Unknown Source",
+                    similarity: (hit.$similarity ?? 1) * (hit.sourceWeight ?? 1.0),
                 }));
+                
+            } catch (error) {
+                console.error(`[${currentDateTime}] Search error:`, error);
+                candidateDocs = [];
+            }
 
-            console.log(`[${currentDateTime}] Found ${relevantDocuments.length} relevant documents`);
-        } catch (error) {
-            console.error(`[${currentDateTime}] Search error for user ${user}:`, JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
-            relevantDocuments = [];
+            // ── Step 2: Enterprise Rerank with Structured Outputs ─────────────────
+            if (candidateDocs.length > 0) {
+                try {
+                    const rerankPrompt = `You are a strict relevance judge for a Formula 1 database.
+Given the user query, score each chunk from 0-10 on how directly it answers the query. 
+If the chunk is unrelated to the query, score it 0.
+
+Query: "${latestMessage}"
+
+Chunks:
+${candidateDocs.map((doc, i) => `[${i}] (${doc.title}) ${doc.content.slice(0, 300)}`).join("\n\n")}`;
+
+                    const rerankRes = await fetch(
+                        `https://generativelanguage.googleapis.com/v1beta/models/${RERANKER_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
+                        {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                contents: [{ role: "user", parts: [{ text: rerankPrompt }] }],
+                                generationConfig: { 
+                                    temperature: 0, 
+                                    responseMimeType: "application/json",
+                                    responseSchema: {
+                                        type: "ARRAY",
+                                        items: { type: "INTEGER" }
+                                    }
+                                },
+                            }),
+                        }
+                    );
+
+                    if (rerankRes.ok) {
+                        const rerankData = await rerankRes.json();
+                        const rawText = rerankData?.candidates?.[0]?.content?.parts?.[0]?.text ?? "[]";
+                        const scores: number[] = JSON.parse(rawText); 
+
+                        if (Array.isArray(scores) && scores.length === candidateDocs.length) {
+                            relevantDocuments = candidateDocs
+                                .map((doc, i) => ({ ...doc, rerankScore: scores[i] ?? 0 }))
+                                .filter(doc => doc.rerankScore! >= 3) 
+                                .sort((a, b) => b.rerankScore! - a.rerankScore!)
+                                .slice(0, 3);
+                                
+                            console.log(`[${currentDateTime}] Reranker processed ${candidateDocs.length}. Passed threshold: ${relevantDocuments.length}`);
+                        } else {
+                            throw new Error("Score array length mismatch.");
+                        }
+                    } else {
+                        throw new Error(`Reranker API returned ${rerankRes.status}`);
+                    }
+                } catch (rerankErr) {
+                    console.warn(`[${currentDateTime}] Reranker failed, falling back to Astra similarity:`, rerankErr);
+                    relevantDocuments = candidateDocs
+                        .filter(doc => doc.similarity >= 0.75) 
+                        .sort((a, b) => b.similarity - a.similarity)
+                        .slice(0, 3);
+                }
+            }
+        } else {
+            // If it IS conversational, we skip Steps 1 and 2 and log it.
+            console.log(`[${currentDateTime}] Conversational query detected ("${latestMessage}"). Bypassing RAG pipeline.`);
         }
 
-        const formattedContext = relevantDocuments.length > 0
-            ? relevantDocuments.map(doc => doc.content).join('\n\n').slice(0, 1000)
-            : "No relevant documents found.";
+        // ── Step 3: Build Context + Generate Stream ──────────────────────────
+        const formattedContext = relevantDocuments.length > 0 
+            ? relevantDocuments.map((doc, i) => `Source ${i + 1} [${doc.title}]:\n${doc.content}`).join("\n\n---\n\n")
+            : "No specific documents found. You may answer using your general knowledge if confident, otherwise politely state you don't have this data.";
 
-        const encoder = new TextEncoder();
-        const stream = new TransformStream();
-        const writer = stream.writable.getWriter();
+        const maxTokens = 500;
+        const systemPrompt = `You are F1GPT, a Formula 1 expert assistant. Current date: ${currentDateTime} UTC.
+CRITICAL RULES:
+- Give responses in SMALL PARAGRAPHS.
+- Use the context provided below as the primary source of information.
+- If the context does not include the answer, you may use knowledge about events up to the current date.
+- Provide concise, factual answers under ${maxTokens} tokens.
+- Do not speculate or provide information about events after the current date.
+- Provide only factual answers. DO NOT include disclaimers.
+
+Context Data:
+${formattedContext}`;
+
+        const prunedMessages: Message[] = messages.slice(-10);
+        const messagesForApi = prunedMessages.map((msg) => ({
+            role: msg.role === "assistant" ? "model" : "user",
+            parts: [{ text: msg.content }],
+        }));
+
+        // 🛡️ Prepend our dynamic system prompt to the conversation flow safely
+        const geminiRes = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:streamGenerateContent?alt=sse&key=${GEMINI_API_KEY}`,
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    systemInstruction: { parts: [{ text: systemPrompt }] },
+                    contents: messagesForApi,
+                    generationConfig: { temperature: 0.3, topP: 0.9, maxOutputTokens: maxTokens },
+                }),
+            }
+        );
+
+        if (!geminiRes.ok || !geminiRes.body) {
+            const errText = await geminiRes.text();
+            throw new Error(`Gemini API error ${geminiRes.status}: ${errText}`);
+        }
+
+        // ── Step 4: SSE Stream Forwarding ────────────────────────────────────
+        const encoder  = new TextEncoder();
+        const outStream = new TransformStream();
+        const writer   = outStream.writable.getWriter();
+
+        req.signal.addEventListener("abort", () => {
+            console.log(`[${currentDateTime}] Client aborted connection.`);
+            writer.close().catch(() => {});
+        });
 
         (async () => {
             const keepAlive = setInterval(() => {
-                writer.write(encoder.encode(`event: ping\ndata: heartbeat\n\n`));
+                writer.write(encoder.encode(`event: ping\ndata: heartbeat\n\n`)).catch(() => {});
             }, 15000);
 
             try {
-                const initialMessage = {
-                    id: Date.now().toString(),
-                    role: 'assistant' as const,
-                    content: '',
-                    createdAt: new Date(),
-                    timestamp: currentDateTime,
-                    user: user
-                };
-                await writer.write(encoder.encode(`data: ${JSON.stringify(initialMessage)}\n\n`));
-                await writer.write(encoder.encode(`event: ping\ndata: init-flush\n\n`));
+                await writer.write(encoder.encode(`data: ${JSON.stringify({
+                    id: Date.now().toString(), role: "assistant", content: "",
+                    createdAt: new Date(), timestamp: currentDateTime, user,
+                })}\n\n`));
 
-                let accumulatedContent = '';
-                const maxTokens = 500;
-                
-                
-                const systemPrompt = `You are F1GPT, a Formula 1 expert assistant. Current date: ${currentDateTime} UTC.
-CRITICAL RULES:
-- Give Responses in SMALL PARAGRAPHS.
-- Use the context provided below as the primary source of information.
-- If the context does not include the answer, you may provide information about events that occurred in 2025 up to the current date (${currentDateTime}) if known.
-- Provide concise, factual answers under ${maxTokens} tokens.
-- Do not speculate or provide information about events not covered in the context or after the current date.
-- Provide only factual answers and DO NOT include any disclaimers in your output.
-- Add emojis only when required, do not add it always.
+                let accumulatedContent = "";
+                const reader  = geminiRes.body!.getReader();
+                const decoder = new TextDecoder();
+                let buffer    = "";
 
-Context:
-${formattedContext}`;
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
 
-                const prunedMessages: Message[] = messages.slice(-10);
-                
-                const messagesForApi = [
-                    { role: "system", content: systemPrompt },
-                    
-                    ...prunedMessages.map(msg => ({
-                        role: msg.role,
-                        content: msg.content
-                    }))
-                ];
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split("\n");
+                    buffer = lines.pop() ?? "";
 
-                console.log(`[${currentDateTime}] API Messages:`, JSON.stringify(messagesForApi, null, 2));
+                    for (const line of lines) {
+                        if (!line.startsWith("data:")) continue;
+                        const raw = line.slice(5).trim();
+                        if (!raw || raw === "[DONE]") continue;
 
-                
-                const responseStream = hfClient.chatCompletionStream({
-                    model: LLM_MODEL,
-                    messages: messagesForApi,
-                    max_tokens: maxTokens, // Note: parameter is max_tokens
-                    temperature: 0.3,
-                    top_p: 0.9,
-                    repetition_penalty: 1.1
-                });
+                        let parsed: any;
+                        try { parsed = JSON.parse(raw); } catch { continue; }
 
-                
-                for await (const chunk of responseStream) {
-                    const newContent = chunk.choices?.[0]?.delta?.content || '';
-                    if (newContent) {
-                        accumulatedContent += newContent;
-                        accumulatedContent = accumulatedContent.replace(/<\/s>/g, '');
-                        const data = {
-                            id: Date.now().toString(),
-                            role: 'assistant' as const,
-                            content: accumulatedContent.trim(),
-                            createdAt: new Date(),
-                            timestamp: currentDateTime,
-                            user: user
-                        };
-                        await writer.write(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+                        const delta: string = parsed?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+                        if (!delta) continue;
+
+                        accumulatedContent += delta;
+                        await writer.write(encoder.encode(`data: ${JSON.stringify({
+                            id: Date.now().toString(), role: "assistant",
+                            content: accumulatedContent, createdAt: new Date(),
+                            timestamp: currentDateTime, user,
+                        })}\n\n`));
                     }
                 }
-                
-                
 
                 await writer.write(encoder.encode(`data: [DONE]\n\n`));
             } catch (error) {
-                console.error(`[${currentDateTime}] Streaming error for user ${user}:`, JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
-                const errorMessage = {
-                    id: Date.now().toString(),
-                    role: 'assistant' as const,
-                    content: "Sorry, there was an error processing your request",
-                    createdAt: new Date(),
-                    timestamp: currentDateTime,
-                    user: user
-                };
-                await writer.write(encoder.encode(`data: ${JSON.stringify(errorMessage)}\n\n`));
+                if (!req.signal.aborted) {
+                    console.error(`[${currentDateTime}] Streaming error:`, error);
+                    await writer.write(encoder.encode(`data: ${JSON.stringify({
+                        id: Date.now().toString(), role: "assistant",
+                        content: "Sorry, there was an error processing your request.",
+                        createdAt: new Date(), timestamp: currentDateTime, user,
+                    })}\n\n`)).catch(() => {});
+                }
             } finally {
                 clearInterval(keepAlive);
-                await writer.close();
+                if (!req.signal.aborted) await writer.close().catch(() => {});
             }
-        })().catch(async (error: unknown) => {
-            console.error(`[${currentDateTime}] Stream error for user ${user}:`, JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
-            const errorMessage = {
-                id: Date.now().toString(),
-                role: 'assistant' as const,
-                content: "Sorry, there was an error processing your request.",
-                createdAt: new Date(),
-                timestamp: currentDateTime,
-                user: user
-            };
-            await writer.write(encoder.encode(`data: ${JSON.stringify(errorMessage)}\n\n`));
-            await writer.close();
-        });
+        })().catch(() => {});
 
-        return new Response(stream.readable, {
+        return new Response(outStream.readable, {
             headers: {
-                'Content-Type': 'text/event-stream',
-                'Cache-Control': 'no-cache, no-transform',
-                'Connection': 'keep-alive',
-                'X-Accel-Buffering': 'no'
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache, no-transform",
+                Connection: "keep-alive",
+                "X-Accel-Buffering": "no",
             },
         });
     } catch (error: unknown) {
-        console.error(`[${currentDateTime}] API Error:`, JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
+        console.error(`[${currentDateTime}] Fatal Route Error:`, error);
         const errorResponse: ErrorResponse = {
             error: "Internal Server Error",
-            details: error instanceof Error ? error.message : "Unknown Error occurred"
+            details: error instanceof Error ? error.message : "Unknown error occurred",
         };
         return new Response(JSON.stringify(errorResponse), {
             status: 500,
-            headers: { "Content-Type": "application/json" }
+            headers: { "Content-Type": "application/json" },
         });
     }
 }

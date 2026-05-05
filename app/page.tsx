@@ -1,7 +1,6 @@
 "use client"
-
 import Image from "next/image";
-import img from "./assets/img.png";
+import img from "./assets/img2.png";
 import Bubble from "./components/Bubble"
 import LoadingBubble from "./components/LoadingBubble";
 import PromptSuggestionRow from "./components/PromptSuggestionRow";
@@ -15,7 +14,7 @@ interface Message {
 }
 
 const MAX_INPUT_LENGTH = 1000;
-const REQUEST_TIMEOUT = 30000; // 30 seconds
+const REQUEST_TIMEOUT = 30000;
 
 const Home = () => {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -47,7 +46,6 @@ const Home = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('Submitting input:', input);
     
     const trimmedInput = input.trim();
     if (!trimmedInput || isLoading || trimmedInput.length > MAX_INPUT_LENGTH) {
@@ -57,7 +55,6 @@ const Home = () => {
     setIsLoading(true);
     const userMessage = createMessage('user', trimmedInput);
 
-    // Update messages optimistically
     setMessages(prev => [...prev, userMessage]);
     setInput('');
 
@@ -112,7 +109,6 @@ const Home = () => {
                 setMessages(prev => {
                   const lastMessage = prev[prev.length - 1];
                   if (lastMessage?.role === 'assistant') {
-                    // Update existing assistant message
                     return [
                       ...prev.slice(0, -1),
                       {
@@ -121,7 +117,6 @@ const Home = () => {
                       }
                     ];
                   }
-                  // Add new message
                   return [...prev, parsed];
                 });
               } catch (parseError) {
@@ -132,7 +127,6 @@ const Home = () => {
         }
       } catch (streamError) {
         if (streamError instanceof Error && streamError.name === 'AbortError') {
-          console.log('Stream reading aborted');
           throw new Error('Request timed out');
         }
         throw streamError;
@@ -172,14 +166,14 @@ const Home = () => {
   return (
     <main>
       <div className="chat-header">
-        <Image src={img} width={150} alt="f1gpt logo" priority />
+        <Image src={img} width={120} alt="F1GPT logo" priority />
       </div>
 
       <section className={`chat-messages ${noMessages ? "" : "populated"}`}>
         {noMessages ? (
           <div className="welcome-container">
             <p className="starter-text">
-              🏁 Welcome to F1GPT! Your ultimate Formula 1 guide. Ask me anything about drivers, races, or the latest news!
+              Welcome to F1GPT. Your ultimate Formula 1 guide. Ask me anything about drivers, races, or the latest news.
             </p>
             <PromptSuggestionRow onPromptClick={handlePrompt} />
           </div>
@@ -190,13 +184,14 @@ const Home = () => {
                 key={`${message.id}-${index}`}
                 className={`message-wrapper ${message.role}`}
               >
-                <Bubble 
-                  key={`bubble-${message.id}`}
-                  message={message} 
-                />
-                {index === messages.length - 1 && isLoading && <LoadingBubble />}
+                <Bubble message={message} />
               </div>
             ))}
+            {isLoading && (
+              <div className="message-wrapper assistant">
+                <LoadingBubble />
+              </div>
+            )}
             <div ref={messagesEndRef} />
           </div>
         )}
@@ -214,19 +209,17 @@ const Home = () => {
           disabled={isLoading}
           maxLength={MAX_INPUT_LENGTH}
           type="text"
-          onKeyPress={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              handleSubmit(e as unknown as React.FormEvent);
-            }
-          }}
         />
         <button 
           type="submit" 
           className={`submit-button ${isLoading || !input.trim() ? 'disabled' : ''}`}
           disabled={isLoading || !input.trim()}
+          aria-label="Send message"
         >
-          Send
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M22 2L11 13" />
+            <path d="M22 2L15 22L11 13L2 9L22 2Z" />
+          </svg>
         </button>
       </form>
     </main>
