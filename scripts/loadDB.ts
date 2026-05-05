@@ -74,6 +74,7 @@ const f1Data: F1Source[] = [
   { url: "https://www.formula1.com/en/results/2025/races/1259/miami/race-result",             category: "results" },
   { url: "https://www.formula1.com/en/results/2025/races/1260/emilia-romagna/race-result",    category: "results" },
   { url: "https://en.wikipedia.org/wiki/2025_Emilia_Romagna_Grand_Prix",                      category: "results" },
+  { url: "https://cl1p.net/ekek"   , category: "results" },
 
   // ── News & misc ────────────────────────────────────────────────────
   { url: "https://www.sportskeeda.com/f1/news-du-du-du-du-max-verstappen-mclaren-academy-driver-bianca-bustamante-sings-hometown-favorite-s-song-team-radio", category: "news" },

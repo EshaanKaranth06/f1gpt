@@ -186,7 +186,8 @@ ${candidateDocs.map((doc, i) => `[${i}] (${doc.title}) ${doc.content.slice(0, 30
             ? relevantDocuments.map((doc, i) => `Source ${i + 1} [${doc.title}]:\n${doc.content}`).join("\n\n---\n\n")
             : "No specific documents found. You may answer using your general knowledge if confident, otherwise politely state you don't have this data.";
 
-        const maxTokens = 500;
+        const isLongQuery = latestMessage.length > 50;
+        const maxTokens = isLongQuery ? 2000 : 500;
         const systemPrompt = `You are F1GPT, a Formula 1 expert assistant. Current date: ${currentDateTime} UTC.
 CRITICAL RULES:
 - Give responses in SMALL PARAGRAPHS.
