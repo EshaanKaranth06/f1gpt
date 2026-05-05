@@ -1,9 +1,13 @@
 const LoadingBubble = () => {
-    return (
-      <div className="bubble assistant">
-        <div className="loader" />
+  return (
+    <div className="bubble assistant loading">
+      <div className="loader">
+        <span className="loader-dot" />
+        <span className="loader-dot" />
+        <span className="loader-dot" />
       </div>
-    );
-  };
-  
-  export default LoadingBubble;
+    </div>
+  );
+};
+
+export default LoadingBubble;
