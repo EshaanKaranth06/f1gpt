@@ -8,9 +8,6 @@ const nextConfig: NextConfig = {
     },
     esmExternals: true // Added for ESM support
   },
-  eslint: {
-    ignoreDuringBuilds: true, 
-  },
   webpack: (config) => {
     config.experiments = {
       ...config.experiments,
